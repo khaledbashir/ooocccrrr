@@ -23,6 +23,7 @@ import "@mantine/core/styles.css";
 
 // Dynamically import Editor to avoid SSR issues with BlockNote/Mantine
 const Editor = dynamic(() => import("@/components/Editor"), { ssr: false });
+const PdfHoverPreview = dynamic(() => import("@/components/PdfHoverPreview"), { ssr: false });
 
 type OcrProvider = "kreuzberg" | "mistral";
 
@@ -378,7 +379,7 @@ export default function Home() {
                 
                 <div className="flex-1 bg-gray-100 rounded-2xl overflow-hidden border border-gray-200 shadow-inner flex items-center justify-center min-h-0">
                   {previewUrl && file.type === "application/pdf" ? (
-                    <iframe src={previewUrl} className="w-full h-full border-none" />
+                    <PdfHoverPreview fileUrl={previewUrl} />
                   ) : previewUrl ? (
                     <img src={previewUrl} alt="Preview" className="max-w-full max-h-full object-contain p-4 shadow-2xl" />
                   ) : excelData ? (
