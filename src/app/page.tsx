@@ -26,6 +26,32 @@ const Editor = dynamic(() => import("@/components/Editor"), { ssr: false });
 
 type OcrProvider = "kreuzberg" | "mistral";
 
+function extractDisplayContent(payload: any): string {
+  if (!payload) return "";
+
+  if (typeof payload === "string") return payload;
+
+  if (Array.isArray(payload)) {
+    return payload
+      .map((item) => extractDisplayContent(item))
+      .filter(Boolean)
+      .join("\n\n");
+  }
+
+  if (Array.isArray(payload.pages)) {
+    return payload.pages
+      .map((page: any) => page?.markdown || page?.content || page?.text || "")
+      .filter(Boolean)
+      .join("\n\n");
+  }
+
+  if (typeof payload.markdown === "string") return payload.markdown;
+  if (typeof payload.content === "string") return payload.content;
+  if (typeof payload.text === "string") return payload.text;
+
+  return JSON.stringify(payload, null, 2);
+}
+
 export default function Home() {
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -170,13 +196,7 @@ export default function Home() {
       const data = response.data.data;
       setJsonResult(data);
       
-      // Extract content for editor
-      let content = "";
-      if (Array.isArray(data)) {
-        content = data.map(item => item.content || item.text || JSON.stringify(item)).join("\n\n");
-      } else {
-        content = data.content || data.text || JSON.stringify(data);
-      }
+      const content = extractDisplayContent(data);
       setExtractedContent(content);
       fetchHistory();
     } catch (error: any) {
@@ -233,12 +253,7 @@ export default function Home() {
                         const data = JSON.parse(item.content);
                         setJsonResult(data);
                         setFile({ name: item.filename } as any);
-                        let content = "";
-                        if (Array.isArray(data)) {
-                          content = data.map(i => i.content || i.text || JSON.stringify(i)).join("\n\n");
-                        } else {
-                          content = data.content || data.text || JSON.stringify(data);
-                        }
+                        const content = extractDisplayContent(data);
                         setExtractedContent(content);
                       }}
                       className="w-full text-left p-3 rounded-lg hover:bg-gray-50 border border-transparent hover:border-gray-200 transition-all group"
