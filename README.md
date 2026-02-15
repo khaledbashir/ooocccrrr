@@ -1,36 +1,55 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# OCR Frontend (Next.js + Prisma + Kreuzberg)
 
-## Getting Started
+This app provides:
 
-First, run the development server:
+- File preview/upload UI
+- OCR/extraction requests to Kreuzberg API
+- Extraction history stored with Prisma
+- PDF page export as individual PNG images (no zip)
+
+## Local development
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open `http://localhost:3000`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Required environment variables
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Create `.env` (or use `.env.example`) with:
 
-## Learn More
+```env
+DATABASE_URL=file:./dev.db
+KREUZBERG_URL=https://basheer-kreuz.prd42b.easypanel.host
+```
 
-To learn more about Next.js, take a look at the following resources:
+## EasyPanel deployment
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+This repo includes a production `Dockerfile`.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+### 1) Create app service from this Git repo
 
-## Deploy on Vercel
+- Runtime: Dockerfile
+- Exposed port: `3000`
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+### 2) Set environment variables in EasyPanel app service
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```env
+DATABASE_URL=file:./dev.db
+KREUZBERG_URL=https://basheer-kreuz.prd42b.easypanel.host
+```
+
+### 3) Persistent storage (important for SQLite)
+
+If you use SQLite in production, mount a persistent volume to keep `dev.db` across restarts.
+
+### 4) Deploy
+
+The container startup command runs:
+
+1. `prisma db push`
+2. `next start`
+
+so schema is synced before app start.

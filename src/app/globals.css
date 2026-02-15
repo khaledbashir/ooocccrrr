@@ -24,3 +24,18 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+.doc-editor .bn-container {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 28px 32px 40px;
+}
+
+.doc-editor .bn-editor {
+  line-height: 1.7;
+  color: #1f2937;
+}
+
+.doc-editor .bn-editor p {
+  margin-bottom: 0.85rem;
+}

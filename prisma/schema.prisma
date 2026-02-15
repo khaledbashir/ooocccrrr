@@ -1,0 +1,18 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+  engineType = "binary"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Extraction {
+  id        String   @id @default(cuid())
+  filename  String
+  content   String   // Store as JSON or Markdown
+  createdAt DateTime @default(now())
+}
