@@ -57,6 +57,25 @@ DATABASE_URL=file:./dev.db
 KREUZBERG_URL=https://basheer-kreuz.prd42b.easypanel.host
 ```
 
+### 2b) Configure Kreuzberg service defaults (EasyPanel Kreuzberg container)
+
+Set Kreuzberg OCR/layout defaults on the Kreuzberg service itself.
+
+- Example file: `deploy/kreuzberg.env.example`
+- Apply those keys in EasyPanel under the Kreuzberg service `Environment` tab
+
+Recommended starting point:
+
+```env
+KREUZBERG_CORS_ORIGINS=https://your-frontend-domain.example
+KREUZBERG_OCR_BACKEND=paddleocr
+KREUZBERG_OCR_LANGUAGE=eng
+KREUZBERG_PDF_HIERARCHY_ENABLED=true
+KREUZBERG_WORKERS=4
+KREUZBERG_CACHE_ENABLED=true
+KREUZBERG_CACHE_DIR=/tmp/kreuzberg-cache
+```
+
 ### 3) Persistent storage (important for SQLite)
 
 If you use SQLite in production, mount a persistent volume to keep `dev.db` across restarts.
