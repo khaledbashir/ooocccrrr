@@ -24,6 +24,8 @@ import "@mantine/core/styles.css";
 // Dynamically import Editor to avoid SSR issues with BlockNote/Mantine
 const Editor = dynamic(() => import("@/components/Editor"), { ssr: false });
 
+type OcrProvider = "kreuzberg" | "mistral";
+
 export default function Home() {
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -37,6 +39,7 @@ export default function Home() {
   const [isPreviewOpen, setIsPreviewOpen] = useState(true);
   const [isEditorOpen, setIsEditorOpen] = useState(true);
   const [isExportingPdf, setIsExportingPdf] = useState(false);
+  const [ocrProvider, setOcrProvider] = useState<OcrProvider>("kreuzberg");
 
   const fetchHistory = useCallback(async () => {
     try {
@@ -160,6 +163,7 @@ export default function Home() {
     setIsExtracting(true);
     const formData = new FormData();
     formData.append("file", file);
+    formData.append("provider", ocrProvider);
 
     try {
       const response = await axios.post("/api/extract", formData);
@@ -290,6 +294,15 @@ export default function Home() {
                   Document Preview
                 </h2>
                 <div className="flex items-center gap-2">
+                  <select
+                    value={ocrProvider}
+                    onChange={(e) => setOcrProvider(e.target.value as OcrProvider)}
+                    className="h-9 rounded-lg border border-slate-200 px-3 text-sm font-medium text-slate-700 bg-white"
+                    title="OCR provider"
+                  >
+                    <option value="kreuzberg">Kreuzberg OCR</option>
+                    <option value="mistral">Mistral OCR</option>
+                  </select>
                   {file && (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) && (
                     <button
                       onClick={handleDownloadPdfImages}
@@ -342,7 +355,7 @@ export default function Home() {
                     </div>
                     <div>
                       <h3 className="font-bold text-gray-900 leading-none">{file.name}</h3>
-                      <p className="text-xs text-gray-400 mt-1">Ready for extraction</p>
+                      <p className="text-xs text-gray-400 mt-1">Ready for extraction • {ocrProvider === "mistral" ? "Mistral OCR" : "Kreuzberg OCR"}</p>
                     </div>
                   </div>
                   <button onClick={() => setFile(null)} className="text-xs text-red-500 hover:underline">Change File</button>

@@ -4,6 +4,7 @@ This app provides:
 
 - File preview/upload UI
 - OCR/extraction requests to Kreuzberg API
+- OCR/extraction requests to Mistral API (optional, selectable in UI)
 - Extraction history stored with Prisma
 - PDF page export as individual PNG images (no zip)
 
@@ -23,7 +24,19 @@ Create `.env` (or use `.env.example`) with:
 ```env
 DATABASE_URL=file:./dev.db
 KREUZBERG_URL=https://basheer-kreuz.prd42b.easypanel.host
+MISTRAL_API_BASE_URL=https://api.mistral.ai
+MISTRAL_OCR_MODEL=mistral-ocr-latest
+MISTRAL_API_KEY=
 ```
+
+## OCR providers
+
+The upload panel has an OCR provider selector:
+
+- `Kreuzberg OCR` (existing flow)
+- `Mistral OCR` (uses `MISTRAL_API_KEY`)
+
+Provider choice is sent per upload request so both providers can coexist.
 
 ## EasyPanel deployment
 
