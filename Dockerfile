@@ -2,11 +2,14 @@ FROM node:20-bookworm-slim
 
 WORKDIR /app
 
+ENV DATABASE_URL=file:./dev.db
+
 COPY package*.json ./
 RUN npm ci
 
 COPY . .
 
+RUN npx prisma generate
 RUN npm run build
 
 ENV NODE_ENV=production
