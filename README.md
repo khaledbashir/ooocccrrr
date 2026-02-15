@@ -27,12 +27,15 @@ KREUZBERG_URL=https://basheer-kreuz.prd42b.easypanel.host
 MISTRAL_API_BASE_URL=https://api.mistral.ai
 MISTRAL_OCR_MODEL=mistral-ocr-latest
 MISTRAL_API_KEY=
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_GLM_OCR_MODEL=glm-ocr:latest
 ```
 
 ## OCR providers
 
 The upload panel has an OCR provider selector:
 
+- `GLM-OCR (Ollama)` (image OCR in current app flow)
 - `Kreuzberg OCR` (existing flow)
 - `Mistral OCR` (uses `MISTRAL_API_KEY`)
 

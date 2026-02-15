@@ -4,8 +4,10 @@ import { prisma } from '@/lib/prisma';
 const kreuzbergBaseUrl = (process.env.KREUZBERG_URL ?? 'http://localhost:8000').replace(/\/$/, '');
 const mistralApiBaseUrl = (process.env.MISTRAL_API_BASE_URL ?? 'https://api.mistral.ai').replace(/\/$/, '');
 const mistralModel = process.env.MISTRAL_OCR_MODEL ?? 'mistral-ocr-latest';
+const ollamaBaseUrl = (process.env.OLLAMA_BASE_URL ?? 'http://localhost:11434').replace(/\/$/, '');
+const ollamaGlmModel = process.env.OLLAMA_GLM_OCR_MODEL ?? 'glm-ocr:latest';
 
-type OcrProvider = 'kreuzberg' | 'mistral';
+type OcrProvider = 'ollama_glm_ocr' | 'kreuzberg' | 'mistral';
 
 function inferMimeType(filename: string): string {
   const lower = filename.toLowerCase();
@@ -50,6 +52,53 @@ async function extractWithKreuzberg(file: File) {
     ok: response.ok,
     status: response.status,
     data,
+  };
+}
+
+async function extractWithOllamaGlm(file: File) {
+  const mimeType = file.type || inferMimeType(file.name);
+
+  if (!mimeType.startsWith('image/')) {
+    return {
+      ok: false,
+      status: 400,
+      data: {
+        error: 'GLM-OCR via Ollama currently supports image files in this app. Use Mistral/Kreuzberg for PDFs.',
+      },
+    };
+  }
+
+  const base64Image = Buffer.from(await file.arrayBuffer()).toString('base64');
+
+  const response = await fetch(`${ollamaBaseUrl}/api/generate`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: ollamaGlmModel,
+      prompt:
+        'Extract all visible text from this image while preserving layout and spacing. Return markdown only.',
+      images: [base64Image],
+      stream: false,
+      options: {
+        temperature: 0,
+      },
+    }),
+  });
+
+  const data = await parseUpstreamResponse(response);
+  const markdown = typeof data === 'object' && data && 'response' in data ? (data as any).response : data;
+
+  return {
+    ok: response.ok,
+    status: response.status,
+    data: {
+      markdown,
+      raw: data,
+      model: ollamaGlmModel,
+      provider: 'ollama_glm_ocr',
+    },
   };
 }
 
@@ -105,7 +154,12 @@ export async function POST(req: Request) {
     const formData = await req.formData();
     const file = formData.get('file') as File;
     const providerInput = (formData.get('provider') as string) ?? 'kreuzberg';
-    const provider: OcrProvider = providerInput === 'mistral' ? 'mistral' : 'kreuzberg';
+    const provider: OcrProvider =
+      providerInput === 'mistral'
+        ? 'mistral'
+        : providerInput === 'ollama_glm_ocr'
+          ? 'ollama_glm_ocr'
+          : 'kreuzberg';
 
     if (!file) {
       return NextResponse.json({ error: 'No file provided' }, { status: 400 });
@@ -114,9 +168,12 @@ export async function POST(req: Request) {
     const normalizedType = file.type && file.type !== 'application/octet-stream' ? file.type : inferMimeType(file.name);
     const normalizedFile = new File([file], file.name, { type: normalizedType });
 
-    const upstream = provider === 'mistral'
-      ? await extractWithMistral(normalizedFile)
-      : await extractWithKreuzberg(normalizedFile);
+    const upstream =
+      provider === 'mistral'
+        ? await extractWithMistral(normalizedFile)
+        : provider === 'ollama_glm_ocr'
+          ? await extractWithOllamaGlm(normalizedFile)
+          : await extractWithKreuzberg(normalizedFile);
 
     if (!upstream.ok) {
       return NextResponse.json(

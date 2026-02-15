@@ -25,7 +25,7 @@ import "@mantine/core/styles.css";
 const Editor = dynamic(() => import("@/components/Editor"), { ssr: false });
 const PdfHoverPreview = dynamic(() => import("@/components/PdfHoverPreview"), { ssr: false });
 
-type OcrProvider = "kreuzberg" | "mistral";
+type OcrProvider = "ollama_glm_ocr" | "kreuzberg" | "mistral";
 
 function extractDisplayContent(payload: any): string {
   if (!payload) return "";
@@ -66,7 +66,7 @@ export default function Home() {
   const [isPreviewOpen, setIsPreviewOpen] = useState(true);
   const [isEditorOpen, setIsEditorOpen] = useState(true);
   const [isExportingPdf, setIsExportingPdf] = useState(false);
-  const [ocrProvider, setOcrProvider] = useState<OcrProvider>("kreuzberg");
+  const [ocrProvider, setOcrProvider] = useState<OcrProvider>("ollama_glm_ocr");
 
   const fetchHistory = useCallback(async () => {
     try {
@@ -316,6 +316,7 @@ export default function Home() {
                     className="h-9 rounded-lg border border-slate-200 px-3 text-sm font-medium text-slate-700 bg-white"
                     title="OCR provider"
                   >
+                    <option value="ollama_glm_ocr">GLM-OCR (Ollama)</option>
                     <option value="kreuzberg">Kreuzberg OCR</option>
                     <option value="mistral">Mistral OCR</option>
                   </select>
@@ -371,7 +372,9 @@ export default function Home() {
                     </div>
                     <div>
                       <h3 className="font-bold text-gray-900 leading-none">{file.name}</h3>
-                      <p className="text-xs text-gray-400 mt-1">Ready for extraction • {ocrProvider === "mistral" ? "Mistral OCR" : "Kreuzberg OCR"}</p>
+                      <p className="text-xs text-gray-400 mt-1">
+                        Ready for extraction • {ocrProvider === "mistral" ? "Mistral OCR" : ocrProvider === "ollama_glm_ocr" ? "GLM-OCR (Ollama)" : "Kreuzberg OCR"}
+                      </p>
                     </div>
                   </div>
                   <button onClick={() => setFile(null)} className="text-xs text-red-500 hover:underline">Change File</button>
