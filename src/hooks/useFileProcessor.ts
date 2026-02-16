@@ -61,8 +61,9 @@ export function useFileProcessor() {
     if (!state.file) return;
 
     const isPdf = isPdfFile(state.file.type, state.file.name);
+    const isImage = isImageFile(state.file.type);
 
-    if (ocrProvider === 'ollama_glm_ocr' && isPdf) {
+    if (ocrProvider === 'ollama_glm_ocr' && !isImage) {
       setState(prev => ({
         ...prev,
         error: ERROR_MESSAGES.PDF_ONLY_FOR_IMAGES,
@@ -84,6 +85,10 @@ export function useFileProcessor() {
       
       if (!response.ok) {
         const errorData = await response.json();
+        // Handle specific error cases
+        if (errorData.error && errorData.error.includes('Unsupported file type')) {
+          throw new Error(ERROR_MESSAGES.UNSUPPORTED_FILE_TYPE);
+        }
         throw new Error(errorData.error || 'Extraction failed');
       }
       
