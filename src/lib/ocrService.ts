@@ -263,26 +263,30 @@ async function extractWithMarker(file: File): Promise<ApiResponse> {
   // Marker supports multiple formats, no special configuration needed
   let response: Response;
   try {
-    debugLog('marker', `Sending request to: ${API_BASE_URLS.marker}/convert`);
-    response = await fetch(`${API_BASE_URLS.marker}/convert`, {
+    debugLog('marker', `Sending request to: ${API_BASE_URLS.marker}/api/convert`);
+    response = await fetch(`${API_BASE_URLS.marker}/api/convert`, {
       method: 'POST',
       body: markerFormData,
     });
     debugLog('marker', `Response status: ${response.status} ${response.statusText}`);
   } catch (error) {
-    debugLog('marker', 'Request failed, falling back to Kreuzberg', error);
-    // Fallback to Kreuzberg if Marker is not available
-    return await extractWithKreuzberg(file);
+    debugLog('marker', 'Request failed', error);
+    return mapFetchFailure(error, 'marker', API_BASE_URLS.marker);
   }
 
   const data = await parseUpstreamResponse(response);
   debugLog('marker', 'Raw response data', data);
   logResponseStructure('marker', data);
 
-  // If Marker service returns an error, fallback to Kreuzberg
   if (!response.ok) {
-    debugLog('marker', 'Marker service error, falling back to Kreuzberg');
-    return await extractWithKreuzberg(file);
+    debugLog('marker', 'Marker service error');
+    return {
+      ok: false,
+      status: response.status,
+      data: {
+        error: `Marker service failed with status ${response.status}`,
+      },
+    };
   }
 
   // Marker returns clean markdown directly
@@ -312,26 +316,30 @@ async function extractWithDocling(file: File): Promise<ApiResponse> {
   // Docling excels at tables and scientific documents
   let response: Response;
   try {
-    debugLog('docling', `Sending request to: ${API_BASE_URLS.docling}/convert`);
-    response = await fetch(`${API_BASE_URLS.docling}/convert`, {
+    debugLog('docling', `Sending request to: ${API_BASE_URLS.docling}/api/convert`);
+    response = await fetch(`${API_BASE_URLS.docling}/api/convert`, {
       method: 'POST',
       body: doclingFormData,
     });
     debugLog('docling', `Response status: ${response.status} ${response.statusText}`);
   } catch (error) {
-    debugLog('docling', 'Request failed, falling back to Kreuzberg', error);
-    // Fallback to Kreuzberg if Docling is not available
-    return await extractWithKreuzberg(file);
+    debugLog('docling', 'Request failed', error);
+    return mapFetchFailure(error, 'docling', API_BASE_URLS.docling);
   }
 
   const data = await parseUpstreamResponse(response);
   debugLog('docling', 'Raw response data', data);
   logResponseStructure('docling', data);
 
-  // If Docling service returns an error, fallback to Kreuzberg
   if (!response.ok) {
-    debugLog('docling', 'Docling service error, falling back to Kreuzberg');
-    return await extractWithKreuzberg(file);
+    debugLog('docling', 'Docling service error');
+    return {
+      ok: false,
+      status: response.status,
+      data: {
+        error: `Docling service failed with status ${response.status}`,
+      },
+    };
   }
 
   // Docling returns structured markdown with excellent table preservation

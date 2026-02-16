@@ -14,8 +14,8 @@ export const API_BASE_URLS = {
   kreuzberg: (process.env.KREUZBERG_URL ?? 'http://localhost:8000').replace(/\/$/, ''),
   mistral: (process.env.MISTRAL_API_BASE_URL ?? 'https://api.mistral.ai').replace(/\/$/, ''),
   ollama: (process.env.OLLAMA_BASE_URL ?? 'http://localhost:11434').replace(/\/$/, ''),
-  marker: (process.env.MARKER_URL ?? 'http://localhost:5000').replace(/\/$/, ''),
-  docling: (process.env.DOCLING_URL ?? 'http://localhost:5001').replace(/\/$/, ''),
+  marker: (process.env.MARKER_URL ?? 'https://basheer-marker.prd42b.easypanel.host').replace(/\/$/, ''),
+  docling: (process.env.DOCLING_URL ?? 'https://basheer-docling.prd42b.easypanel.host').replace(/\/$/, ''),
 } as const;
 
 // Model Configuration
