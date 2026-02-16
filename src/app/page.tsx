@@ -216,9 +216,11 @@ export default function Home() {
                     className="h-9 rounded-lg border border-slate-200 px-3 text-sm font-medium text-slate-700 bg-white"
                     title="OCR provider"
                   >
-                    <option value="ollama_glm_ocr">GLM-OCR (Ollama)</option>
-                    <option value="kreuzberg">Kreuzberg OCR</option>
+                    <option value="marker">Marker (Best Formatting)</option>
+                    <option value="docling">Docling (Precise Tables)</option>
                     <option value="mistral">Mistral OCR</option>
+                    <option value="kreuzberg">Kreuzberg OCR</option>
+                    <option value="ollama_glm_ocr">GLM-OCR (Ollama)</option>
                   </select>
                   {file && (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) && (
                     <button
@@ -287,7 +289,13 @@ export default function Home() {
                     <div>
                       <h3 className="font-bold text-gray-900 leading-none">{file.name}</h3>
                       <p className="text-xs text-gray-400 mt-1">
-                        Ready for extraction • {ocrProvider === "mistral" ? "Mistral OCR" : ocrProvider === "ollama_glm_ocr" ? "GLM-OCR (Ollama)" : "Kreuzberg OCR"}
+                        Ready for extraction • {
+                          ocrProvider === "marker" ? "Marker (Best Formatting)" :
+                          ocrProvider === "docling" ? "Docling (Precise Tables)" :
+                          ocrProvider === "mistral" ? "Mistral OCR" :
+                          ocrProvider === "ollama_glm_ocr" ? "GLM-OCR (Ollama)" :
+                          "Kreuzberg OCR"
+                        }
                       </p>
                     </div>
                   </div>

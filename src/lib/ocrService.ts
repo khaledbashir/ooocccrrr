@@ -29,7 +29,11 @@ function mapFetchFailure(error: unknown, provider: OcrProvider, baseUrl: string)
       ? `Cannot connect to Ollama at ${baseUrl}. Start Ollama and ensure model "${OCR_MODELS.ollamaGlm}" is installed.`
       : provider === 'kreuzberg'
         ? `Cannot connect to Kreuzberg at ${baseUrl}.`
-        : `Cannot connect to Mistral API at ${baseUrl}.`;
+        : provider === 'mistral'
+          ? `Cannot connect to Mistral API at ${baseUrl}.`
+          : provider === 'marker'
+            ? `Cannot connect to Marker at ${baseUrl}.`
+            : `Cannot connect to Docling at ${baseUrl}.`;
 
   return {
     ok: false,
@@ -250,12 +254,100 @@ async function extractWithMistral(file: File): Promise<ApiResponse> {
   };
 }
 
+async function extractWithMarker(file: File): Promise<ApiResponse> {
+  debugLog('marker', `Starting extraction for file: ${file.name} (${file.type})`);
+  
+  const markerFormData = new FormData();
+  markerFormData.append('file', file, file.name);
+  
+  // Marker supports multiple formats, no special configuration needed
+  let response: Response;
+  try {
+    debugLog('marker', `Sending request to: ${API_BASE_URLS.marker}/convert`);
+    response = await fetch(`${API_BASE_URLS.marker}/convert`, {
+      method: 'POST',
+      body: markerFormData,
+    });
+    debugLog('marker', `Response status: ${response.status} ${response.statusText}`);
+  } catch (error) {
+    debugLog('marker', 'Request failed', error);
+    return mapFetchFailure(error, 'marker', API_BASE_URLS.marker);
+  }
+
+  const data = await parseUpstreamResponse(response);
+  debugLog('marker', 'Raw response data', data);
+  logResponseStructure('marker', data);
+
+  // Marker returns clean markdown directly
+  const extractedMarkdown = typeof data === 'string' ? data : extractContentWithFallback(data);
+  
+  const processedData = {
+    ...data,
+    provider: 'marker',
+    markdown: extractedMarkdown
+  };
+
+  debugLog('marker', 'Processed data', processedData);
+
+  return {
+    ok: response.ok,
+    status: response.status,
+    data: processedData,
+  };
+}
+
+async function extractWithDocling(file: File): Promise<ApiResponse> {
+  debugLog('docling', `Starting extraction for file: ${file.name} (${file.type})`);
+  
+  const doclingFormData = new FormData();
+  doclingFormData.append('file', file, file.name);
+  
+  // Docling excels at tables and scientific documents
+  let response: Response;
+  try {
+    debugLog('docling', `Sending request to: ${API_BASE_URLS.docling}/convert`);
+    response = await fetch(`${API_BASE_URLS.docling}/convert`, {
+      method: 'POST',
+      body: doclingFormData,
+    });
+    debugLog('docling', `Response status: ${response.status} ${response.statusText}`);
+  } catch (error) {
+    debugLog('docling', 'Request failed', error);
+    return mapFetchFailure(error, 'docling', API_BASE_URLS.docling);
+  }
+
+  const data = await parseUpstreamResponse(response);
+  debugLog('docling', 'Raw response data', data);
+  logResponseStructure('docling', data);
+
+  // Docling returns structured markdown with excellent table preservation
+  const extractedMarkdown = typeof data === 'string' ? data : extractContentWithFallback(data);
+  
+  const processedData = {
+    ...data,
+    provider: 'docling',
+    markdown: extractedMarkdown
+  };
+
+  debugLog('docling', 'Processed data', processedData);
+
+  return {
+    ok: response.ok,
+    status: response.status,
+    data: processedData,
+  };
+}
+
 export async function extractContent(file: File, provider: OcrProvider): Promise<ApiResponse> {
   switch (provider) {
     case 'mistral':
       return await extractWithMistral(file);
     case 'ollama_glm_ocr':
       return await extractWithOllamaGlm(file);
+    case 'marker':
+      return await extractWithMarker(file);
+    case 'docling':
+      return await extractWithDocling(file);
     case 'kreuzberg':
     default:
       return await extractWithKreuzberg(file);

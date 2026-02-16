@@ -9,13 +9,17 @@ export async function POST(req: Request): Promise<NextResponse<ExtractionRespons
   try {
     const formData = await req.formData();
     const file = formData.get('file') as File;
-    const providerInput = (formData.get('provider') as string) ?? 'kreuzberg';
+    const providerInput = (formData.get('provider') as string) ?? 'marker';
     const provider: OcrProvider =
       providerInput === 'mistral'
         ? 'mistral'
         : providerInput === 'ollama_glm_ocr'
           ? 'ollama_glm_ocr'
-          : 'kreuzberg';
+          : providerInput === 'marker'
+            ? 'marker'
+            : providerInput === 'docling'
+              ? 'docling'
+              : 'kreuzberg';
 
     if (!file) {
       return NextResponse.json({ error: ERROR_MESSAGES.NO_FILE }, { status: 400 });
