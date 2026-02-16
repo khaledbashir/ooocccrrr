@@ -263,8 +263,8 @@ async function extractWithMarker(file: File): Promise<ApiResponse> {
   // Marker supports multiple formats, no special configuration needed
   let response: Response;
   try {
-    debugLog('marker', `Sending request to: ${API_BASE_URLS.marker}/api/convert`);
-    response = await fetch(`${API_BASE_URLS.marker}/api/convert`, {
+    debugLog('marker', `Sending request to: ${API_BASE_URLS.marker}/`);
+    response = await fetch(`${API_BASE_URLS.marker}/`, {
       method: 'POST',
       body: markerFormData,
     });
@@ -316,8 +316,8 @@ async function extractWithDocling(file: File): Promise<ApiResponse> {
   // Docling excels at tables and scientific documents
   let response: Response;
   try {
-    debugLog('docling', `Sending request to: ${API_BASE_URLS.docling}/api/convert`);
-    response = await fetch(`${API_BASE_URLS.docling}/api/convert`, {
+    debugLog('docling', `Sending request to: ${API_BASE_URLS.docling}/`);
+    response = await fetch(`${API_BASE_URLS.docling}/`, {
       method: 'POST',
       body: doclingFormData,
     });
