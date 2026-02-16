@@ -1,14 +1,14 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { 
-  FileText, 
-  Upload, 
+import {
+  FileText,
+  Upload,
   Download,
-  History, 
-  Plus, 
-  Loader2, 
-  Image as ImageIcon, 
+  History,
+  Plus,
+  Loader2,
+  Image as ImageIcon,
   FileSpreadsheet,
   File as FileIcon,
   ChevronLeft,
@@ -16,57 +16,44 @@ import {
   Database
 } from "lucide-react";
 import axios from "axios";
-import * as XLSX from "xlsx";
 import dynamic from "next/dynamic";
 import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
+
+import { OcrProvider } from "@/lib/constants";
+import { extractDisplayContent } from "@/lib/utils";
+import { useFileProcessor } from "@/hooks/useFileProcessor";
+import { usePdfExport } from "@/hooks/usePdfExport";
+import { HistoryItem } from "@/types";
 
 // Dynamically import Editor to avoid SSR issues with BlockNote/Mantine
 const Editor = dynamic(() => import("@/components/Editor"), { ssr: false });
 const PdfHoverPreview = dynamic(() => import("@/components/PdfHoverPreview"), { ssr: false });
 
-type OcrProvider = "ollama_glm_ocr" | "kreuzberg" | "mistral";
-
-function extractDisplayContent(payload: any): string {
-  if (!payload) return "";
-
-  if (typeof payload === "string") return payload;
-
-  if (Array.isArray(payload)) {
-    return payload
-      .map((item) => extractDisplayContent(item))
-      .filter(Boolean)
-      .join("\n\n");
-  }
-
-  if (Array.isArray(payload.pages)) {
-    return payload.pages
-      .map((page: any) => page?.markdown || page?.content || page?.text || "")
-      .filter(Boolean)
-      .join("\n\n");
-  }
-
-  if (typeof payload.markdown === "string") return payload.markdown;
-  if (typeof payload.content === "string") return payload.content;
-  if (typeof payload.text === "string") return payload.text;
-
-  return JSON.stringify(payload, null, 2);
-}
-
 export default function Home() {
-  const [file, setFile] = useState<File | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [excelData, setExcelData] = useState<string | null>(null);
-  const [isExtracting, setIsExtracting] = useState(false);
-  const [extractedContent, setExtractedContent] = useState<string>("");
-  const [history, setHistory] = useState<any[]>([]);
+  const [history, setHistory] = useState<HistoryItem[]>([]);
   const [activeTab, setActiveTab] = useState<"document" | "json">("document");
-  const [jsonResult, setJsonResult] = useState<any>(null);
   const [isNavOpen, setIsNavOpen] = useState(true);
   const [isPreviewOpen, setIsPreviewOpen] = useState(true);
   const [isEditorOpen, setIsEditorOpen] = useState(true);
-  const [isExportingPdf, setIsExportingPdf] = useState(false);
-  const [ocrProvider, setOcrProvider] = useState<OcrProvider>("ollama_glm_ocr");
+  const [ocrProvider, setOcrProvider] = useState<OcrProvider>("kreuzberg");
+  
+  const {
+    file,
+    previewUrl,
+    excelData,
+    isExtracting,
+    extractedContent,
+    jsonResult,
+    error,
+    processFile,
+    extractContent,
+    clearFile,
+    clearError,
+    setHistoryItem,
+  } = useFileProcessor();
+  
+  const { isExporting, exportPdfToImages } = usePdfExport();
 
   const fetchHistory = useCallback(async () => {
     try {
@@ -85,135 +72,20 @@ export default function Home() {
     const selectedFile = e.target.files?.[0];
     if (selectedFile) {
       processFile(selectedFile);
+      clearError();
     }
   };
 
   const handleDownloadPdfImages = async () => {
     if (!file) return;
-
-    try {
-      setIsExportingPdf(true);
-
-      const pdfjs = await import("pdfjs-dist");
-      pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-        "pdfjs-dist/build/pdf.worker.min.mjs",
-        import.meta.url,
-      ).toString();
-
-      const pdfData = await file.arrayBuffer();
-      const loadingTask = pdfjs.getDocument({ data: pdfData });
-      const pdf = await loadingTask.promise;
-      const baseName = file.name.replace(/\.pdf$/i, "") || "document";
-
-      for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
-        const page = await pdf.getPage(pageNumber);
-        const viewport = page.getViewport({ scale: 2 });
-
-        const canvas = document.createElement("canvas");
-        const context = canvas.getContext("2d");
-
-        if (!context) {
-          throw new Error("Could not create canvas context for PDF export");
-        }
-
-        canvas.width = viewport.width;
-        canvas.height = viewport.height;
-
-        await page.render({
-          canvas,
-          canvasContext: context,
-          viewport,
-        }).promise;
-
-        const blob: Blob = await new Promise((resolve, reject) => {
-          canvas.toBlob((result) => {
-            if (result) {
-              resolve(result);
-            } else {
-              reject(new Error(`Failed to convert page ${pageNumber} to image`));
-            }
-          }, "image/png");
-        });
-
-        const imageUrl = URL.createObjectURL(blob);
-        const link = document.createElement("a");
-        link.href = imageUrl;
-        link.download = `${baseName}-page-${String(pageNumber).padStart(2, "0")}.png`;
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-        URL.revokeObjectURL(imageUrl);
-      }
-    } catch (error: any) {
-      console.error("PDF image export failed", error);
-      alert(error?.message || "Failed to export PDF pages as images");
-    } finally {
-      setIsExportingPdf(false);
-    }
-  };
-
-  const processFile = (selectedFile: File) => {
-    setFile(selectedFile);
-    setExtractedContent("");
-    setJsonResult(null);
-
-    // Create preview
-    if (selectedFile.type.startsWith("image/") || selectedFile.type === "application/pdf") {
-      const url = URL.createObjectURL(selectedFile);
-      setPreviewUrl(url);
-      setExcelData(null);
-    } else if (
-      selectedFile.name.endsWith(".xlsx") || 
-      selectedFile.name.endsWith(".xls") || 
-      selectedFile.name.endsWith(".csv")
-    ) {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const data = new Uint8Array(e.target?.result as ArrayBuffer);
-        const workbook = XLSX.read(data, { type: "array" });
-        const firstSheetName = workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[firstSheetName];
-        const html = XLSX.utils.sheet_to_html(worksheet);
-        setExcelData(html);
-        setPreviewUrl(null);
-      };
-      reader.readAsArrayBuffer(selectedFile);
-    } else {
-      setPreviewUrl(null);
-      setExcelData(null);
-    }
+    await exportPdfToImages(file);
   };
 
   const handleUpload = async () => {
     if (!file) return;
-
-    setIsExtracting(true);
-    const formData = new FormData();
-    formData.append("file", file);
-    formData.append("provider", ocrProvider);
-
-    try {
-      const response = await axios.post("/api/extract", formData);
-      const data = response.data.data;
-      setJsonResult(data);
-      
-      const content = extractDisplayContent(data);
-      setExtractedContent(content);
-      fetchHistory();
-    } catch (error: any) {
-      console.error("Extraction failed", error);
-
-      const message =
-        error?.response?.data?.upstream?.error ||
-        error?.response?.data?.upstream?.message ||
-        error?.response?.data?.error ||
-        error?.message ||
-        "Extraction failed";
-
-      alert(message);
-    } finally {
-      setIsExtracting(false);
-    }
+    
+    await extractContent(ocrProvider);
+    fetchHistory();
   };
 
   return (
@@ -251,11 +123,7 @@ export default function Home() {
                     <button
                       key={item.id}
                       onClick={() => {
-                        const data = JSON.parse(item.content);
-                        setJsonResult(data);
-                        setFile({ name: item.filename } as any);
-                        const content = extractDisplayContent(data);
-                        setExtractedContent(content);
+                        setHistoryItem(item);
                       }}
                       className="w-full text-left p-3 rounded-lg hover:bg-gray-50 border border-transparent hover:border-gray-200 transition-all group"
                     >
@@ -323,15 +191,24 @@ export default function Home() {
                   {file && (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) && (
                     <button
                       onClick={handleDownloadPdfImages}
-                      disabled={isExportingPdf}
+                      disabled={isExporting}
                       className="inline-flex items-center gap-2 bg-white text-slate-700 border border-slate-200 px-4 py-2 rounded-lg hover:bg-slate-50 transition-all text-sm font-semibold disabled:opacity-60 disabled:cursor-not-allowed"
                       title="Download each PDF page as PNG"
                     >
-                      {isExportingPdf ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
-                      {isExportingPdf ? "Exporting..." : "Download Images"}
+                      {isExporting ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+                      {isExporting ? "Exporting..." : "Download Images"}
                     </button>
                   )}
-                  {file && !isExtracting && !extractedContent && (
+                  {error && (
+                    <button
+                      onClick={clearError}
+                      className="inline-flex items-center gap-2 bg-red-50 text-red-700 border border-red-200 px-4 py-2 rounded-lg hover:bg-red-100 transition-all text-sm font-semibold"
+                      title="Clear error"
+                    >
+                      Clear Error
+                    </button>
+                  )}
+                  {file && !isExtracting && !extractedContent && !error && (
                     <button
                       onClick={handleUpload}
                       className="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 transition-all text-sm font-semibold shadow-md"
@@ -377,7 +254,7 @@ export default function Home() {
                       </p>
                     </div>
                   </div>
-                  <button onClick={() => setFile(null)} className="text-xs text-red-500 hover:underline">Change File</button>
+                  <button onClick={clearFile} className="text-xs text-red-500 hover:underline">Change File</button>
                 </div>
                 
                 <div className="flex-1 bg-gray-100 rounded-2xl overflow-hidden border border-gray-200 shadow-inner flex items-center justify-center min-h-0">
@@ -402,6 +279,16 @@ export default function Home() {
                 <Loader2 size={48} className="text-indigo-600 animate-spin mb-4" />
                 <p className="text-xl font-bold text-gray-900">Extracting content...</p>
                 <p className="text-sm text-gray-500 mt-2">Our AI is processing your document</p>
+              </div>
+            )}
+            
+            {error && (
+              <div className="absolute inset-0 bg-red-50/80 backdrop-blur-md flex flex-col items-center justify-center z-20 p-8">
+                <div className="bg-red-100 rounded-full p-4 mb-4">
+                  <FileText size={32} className="text-red-600" />
+                </div>
+                <p className="text-xl font-bold text-red-900 mb-2">Extraction Error</p>
+                <p className="text-sm text-red-700 text-center max-w-md">{error}</p>
               </div>
             )}
               </div>

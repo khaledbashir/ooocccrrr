@@ -5,11 +5,7 @@ import { useCreateBlockNote } from "@blocknote/react";
 import { BlockNoteView } from "@blocknote/mantine";
 import "@blocknote/mantine/style.css";
 import { useEffect } from "react";
-
-interface EditorProps {
-  initialContent?: string;
-  onChange?: (content: string) => void;
-}
+import { EditorProps } from "@/types";
 
 export default function Editor({ initialContent, onChange }: EditorProps) {
   const editor = useCreateBlockNote();

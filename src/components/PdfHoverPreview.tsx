@@ -1,19 +1,15 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-
-type TextItem = {
-  str: string;
-  transform: number[];
-  width: number;
-};
+import { UI_STATES } from "@/lib/constants";
+import { PdfTextItem } from "@/types";
 
 export default function PdfHoverPreview({ fileUrl }: { fileUrl: string }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [numPages, setNumPages] = useState(1);
   const [pageNumber, setPageNumber] = useState(1);
-  const [scale, setScale] = useState(1.2);
-  const [textItems, setTextItems] = useState<TextItem[]>([]);
+  const [scale, setScale] = useState<number>(UI_STATES.DEFAULT_SCALE);
+  const [textItems, setTextItems] = useState<PdfTextItem[]>([]);
   const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
 
   const pageLabel = useMemo(() => `${pageNumber} / ${numPages}`, [pageNumber, numPages]);
@@ -60,7 +56,7 @@ export default function PdfHoverPreview({ fileUrl }: { fileUrl: string }) {
       }).promise;
 
       const textContent = await page.getTextContent();
-      const items = (textContent.items as TextItem[]).filter((item) => typeof item?.str === "string");
+      const items = (textContent.items as PdfTextItem[]).filter((item) => typeof item?.str === "string");
       setTextItems(items);
     }
 
@@ -98,14 +94,14 @@ export default function PdfHoverPreview({ fileUrl }: { fileUrl: string }) {
 
         <div className="inline-flex items-center gap-2">
           <button
-            onClick={() => setScale((s) => Math.max(0.8, Number((s - 0.1).toFixed(1))))}
+            onClick={() => setScale((s) => Math.max(UI_STATES.MIN_SCALE, Number((s - UI_STATES.SCALE_STEP).toFixed(1))))}
             className="px-2 py-1 rounded border border-slate-200"
           >
             -
           </button>
           <span className="font-semibold">{Math.round(scale * 100)}%</span>
           <button
-            onClick={() => setScale((s) => Math.min(2.4, Number((s + 0.1).toFixed(1))))}
+            onClick={() => setScale((s) => Math.min(UI_STATES.MAX_SCALE, Number((s + UI_STATES.SCALE_STEP).toFixed(1))))}
             className="px-2 py-1 rounded border border-slate-200"
           >
             +

@@ -5,6 +5,7 @@ This app provides:
 - File preview/upload UI
 - OCR/extraction requests to Kreuzberg API
 - OCR/extraction requests to Mistral API (optional, selectable in UI)
+- OCR/extraction requests to Ollama GLM-OCR (optional, selectable in UI)
 - Extraction history stored with Prisma
 - PDF page export as individual PNG images (no zip)
 
@@ -35,11 +36,20 @@ OLLAMA_GLM_OCR_MODEL=glm-ocr:latest
 
 The upload panel has an OCR provider selector:
 
-- `GLM-OCR (Ollama)` (image OCR in current app flow)
-- `Kreuzberg OCR` (existing flow)
-- `Mistral OCR` (uses `MISTRAL_API_KEY`)
+- `Kreuzberg OCR` (default)
+- `GLM-OCR (Ollama)` (image OCR only in current app flow)
+- `Mistral OCR` (requires `MISTRAL_API_KEY`)
 
-Provider choice is sent per upload request so both providers can coexist.
+Provider choice is sent per upload request so all providers can coexist.
+
+If you choose `GLM-OCR (Ollama)`, Ollama must be running and reachable from the app host.
+
+Example local setup:
+
+```bash
+ollama serve
+ollama pull glm-ocr:latest
+```
 
 ## EasyPanel deployment
 
