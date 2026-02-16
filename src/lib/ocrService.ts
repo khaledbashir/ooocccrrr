@@ -270,13 +270,20 @@ async function extractWithMarker(file: File): Promise<ApiResponse> {
     });
     debugLog('marker', `Response status: ${response.status} ${response.statusText}`);
   } catch (error) {
-    debugLog('marker', 'Request failed', error);
-    return mapFetchFailure(error, 'marker', API_BASE_URLS.marker);
+    debugLog('marker', 'Request failed, falling back to Kreuzberg', error);
+    // Fallback to Kreuzberg if Marker is not available
+    return await extractWithKreuzberg(file);
   }
 
   const data = await parseUpstreamResponse(response);
   debugLog('marker', 'Raw response data', data);
   logResponseStructure('marker', data);
+
+  // If Marker service returns an error, fallback to Kreuzberg
+  if (!response.ok) {
+    debugLog('marker', 'Marker service error, falling back to Kreuzberg');
+    return await extractWithKreuzberg(file);
+  }
 
   // Marker returns clean markdown directly
   const extractedMarkdown = typeof data === 'string' ? data : extractContentWithFallback(data);
@@ -312,13 +319,20 @@ async function extractWithDocling(file: File): Promise<ApiResponse> {
     });
     debugLog('docling', `Response status: ${response.status} ${response.statusText}`);
   } catch (error) {
-    debugLog('docling', 'Request failed', error);
-    return mapFetchFailure(error, 'docling', API_BASE_URLS.docling);
+    debugLog('docling', 'Request failed, falling back to Kreuzberg', error);
+    // Fallback to Kreuzberg if Docling is not available
+    return await extractWithKreuzberg(file);
   }
 
   const data = await parseUpstreamResponse(response);
   debugLog('docling', 'Raw response data', data);
   logResponseStructure('docling', data);
+
+  // If Docling service returns an error, fallback to Kreuzberg
+  if (!response.ok) {
+    debugLog('docling', 'Docling service error, falling back to Kreuzberg');
+    return await extractWithKreuzberg(file);
+  }
 
   // Docling returns structured markdown with excellent table preservation
   const extractedMarkdown = typeof data === 'string' ? data : extractContentWithFallback(data);

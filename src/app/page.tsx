@@ -20,7 +20,7 @@ import dynamic from "next/dynamic";
 import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
 
-import { OcrProvider } from "@/lib/constants";
+import { OcrProvider, API_BASE_URLS } from "@/lib/constants";
 import { extractDisplayContent } from "@/lib/utils";
 import { useFileProcessor } from "@/hooks/useFileProcessor";
 import { usePdfExport } from "@/hooks/usePdfExport";
@@ -105,6 +105,13 @@ export default function Home() {
 
   const handleUpload = async () => {
     if (!file) return;
+    
+    // Show warning if using Marker or Docling
+    if (ocrProvider === 'marker' || ocrProvider === 'docling') {
+      const serviceName = ocrProvider === 'marker' ? 'Marker' : 'Docling';
+      const serviceUrl = ocrProvider === 'marker' ? API_BASE_URLS.marker : API_BASE_URLS.docling;
+      console.warn(`${serviceName} service may not be running. Expected at: ${serviceUrl}`);
+    }
     
     await extractContent(ocrProvider);
     fetchHistory();
