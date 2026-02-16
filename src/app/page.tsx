@@ -37,6 +37,7 @@ export default function Home() {
   const [isPreviewOpen, setIsPreviewOpen] = useState(true);
   const [isEditorOpen, setIsEditorOpen] = useState(true);
   const [ocrProvider, setOcrProvider] = useState<OcrProvider>("kreuzberg");
+  const [editorEnabled, setEditorEnabled] = useState(false);
   
   const {
     file,
@@ -109,6 +110,16 @@ export default function Home() {
     fetchHistory();
   };
 
+  const handleReset = () => {
+    clearFile();
+    clearError();
+    setEditorEnabled(false);
+  };
+
+  const handleEnableEditor = () => {
+    setEditorEnabled(true);
+  };
+
   return (
     <MantineProvider>
       <main className="flex h-screen bg-slate-100 overflow-hidden font-sans p-3 gap-3">
@@ -117,12 +128,12 @@ export default function Home() {
           {isNavOpen ? (
             <>
               <div className="p-4 border-b flex items-center gap-2">
-                <button 
-                  onClick={() => window.location.reload()}
-                  className="flex-1 flex items-center justify-center gap-2 bg-indigo-600 text-white py-2.5 px-4 rounded-xl hover:bg-indigo-700 transition-all shadow-sm font-medium"
+                <button
+                  onClick={handleReset}
+                  className="flex-1 flex items-center justify-center gap-2 bg-red-600 text-white py-2.5 px-4 rounded-xl hover:bg-red-700 transition-all shadow-sm font-medium"
                 >
                   <Plus size={18} />
-                  New Extraction
+                  Reset All
                 </button>
                 <button
                   onClick={() => setIsNavOpen(false)}
@@ -368,11 +379,19 @@ export default function Home() {
             {activeTab === "document" ? (
               extractedContent ? (
                 <Editor initialContent={extractedContent} />
+              ) : editorEnabled ? (
+                <Editor initialContent="" />
               ) : (
                 <div className="h-full flex flex-col items-center justify-center p-8 text-center text-gray-400">
                   <FileText size={64} strokeWidth={1} className="mb-4 opacity-20" />
                   <p className="text-lg font-medium">No extraction results yet</p>
-                  <p className="text-sm mt-1">Upload and extract a file to see the block editor in action</p>
+                  <p className="text-sm mt-1 mb-4">Upload and extract a file to see the block editor in action</p>
+                  <button
+                    onClick={handleEnableEditor}
+                    className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition-all text-sm font-semibold shadow-md"
+                  >
+                    Use Editor Without File
+                  </button>
                 </div>
               )
             ) : (
