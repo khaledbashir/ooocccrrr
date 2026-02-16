@@ -48,10 +48,27 @@ async function extractWithKreuzberg(file: File): Promise<ApiResponse> {
   const kreuzbergFormData = new FormData();
   kreuzbergFormData.append('file', file, file.name);
   kreuzbergFormData.append('files', file, file.name);
+  
+  // Add improved configuration options based on best practices
+  const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+  const isImage = isImageFile(file.type);
+  
+  // Configure extraction options based on file type
+  if (isPdf) {
+    kreuzbergFormData.append('extract_tables', 'true');
+    kreuzbergFormData.append('preserve_layout', 'true');
+    kreuzbergFormData.append('output_format', 'markdown');
+  } else if (isImage) {
+    kreuzbergFormData.append('enhance_image', 'true');
+    kreuzbergFormData.append('extract_tables', 'true');
+    kreuzbergFormData.append('output_format', 'markdown');
+  }
 
   let response: Response;
   try {
     debugLog('kreuzberg', `Sending request to: ${API_BASE_URLS.kreuzberg}/extract`);
+    debugLog('kreuzberg', `File type: ${file.type}, isPdf: ${isPdf}, isImage: ${isImage}`);
+    
     response = await fetch(`${API_BASE_URLS.kreuzberg}/extract`, {
       method: 'POST',
       body: kreuzbergFormData,
@@ -104,13 +121,31 @@ async function extractWithOllamaGlm(file: File): Promise<ApiResponse> {
 
   let response: Response;
   try {
+    // Enhanced prompt for better formatting based on successful examples
+    const enhancedPrompt = `Extract all text from this image and format it as structured markdown.
+
+Rules:
+- Preserve the original layout and structure
+- Use proper markdown formatting (headers, lists, tables)
+- For tables: create proper markdown tables with | separators
+- For text blocks: preserve paragraphs with double line breaks
+- For headings: use # ## ### based on hierarchy
+- For lists: use - or * for bullet points, 1. 2. for numbered lists
+- Maintain column alignment for tabular data
+- Include ALL visible text, even small print
+- Do not add any explanations or notes outside the extracted content
+
+Return ONLY the markdown-formatted text without any additional commentary.`;
+
     const requestBody = {
       model: OCR_MODELS.ollamaGlm,
-      prompt: 'Extract all visible text from this image while preserving layout and spacing. Return markdown only.',
+      prompt: enhancedPrompt,
       images: [base64Image],
       stream: false,
       options: {
-        temperature: 0,
+        temperature: 0.1, // Slightly higher for better formatting decisions
+        top_p: 0.9,
+        repeat_penalty: 1.1,
       },
     };
     
