@@ -258,14 +258,18 @@ async function extractWithMarker(file: File): Promise<ApiResponse> {
   debugLog('marker', `Starting extraction for file: ${file.name} (${file.type})`);
   
   const markerFormData = new FormData();
-  markerFormData.append('file', file, file.name);
+  // Use the correct field name as per the API documentation
+  markerFormData.append('pdf_file', file, file.name);
   
   // Marker supports multiple formats, no special configuration needed
   let response: Response;
   try {
-    debugLog('marker', `Sending request to: ${API_BASE_URLS.marker}/`);
-    response = await fetch(`${API_BASE_URLS.marker}/`, {
+    debugLog('marker', `Sending request to: ${API_BASE_URLS.marker}/convert`);
+    response = await fetch(`${API_BASE_URLS.marker}/convert`, {
       method: 'POST',
+      headers: {
+        'accept': 'application/json',
+      },
       body: markerFormData,
     });
     debugLog('marker', `Response status: ${response.status} ${response.statusText}`);
@@ -289,8 +293,8 @@ async function extractWithMarker(file: File): Promise<ApiResponse> {
     };
   }
 
-  // Marker returns clean markdown directly
-  const extractedMarkdown = typeof data === 'string' ? data : extractContentWithFallback(data);
+  // Marker returns markdown in 'text' or 'markdown' field according to docs
+  const extractedMarkdown = data?.text || data?.markdown || extractContentWithFallback(data);
   
   const processedData = {
     ...data,
