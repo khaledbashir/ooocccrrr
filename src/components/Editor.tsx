@@ -242,8 +242,10 @@ export default function Editor({ initialContent, onChange }: EditorProps) {
           model: model || undefined,
           instruction: [
             "You are an AI document copilot in chat mode.",
+            mode === "edit"
+              ? "You are in EDIT MODE: prioritize returning full revised markdown ready to apply to the document."
+              : "You are in CHAT MODE: focus on analysis, options, and concise guidance before rewriting.",
             "Respond as a concise assistant in markdown with clear structure.",
-            "If the user asks to edit the document, provide the full revised markdown so it can be applied directly.",
             "Preserve key numbers and entities from the document unless the user asks otherwise.",
             "Recent chat context:",
             nextMessages
@@ -326,25 +328,6 @@ export default function Editor({ initialContent, onChange }: EditorProps) {
               {isAiToolbarOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
               AI Toolbar
             </button>
-            <div className="inline-flex items-center rounded-md border border-slate-200 bg-slate-50 p-0.5">
-              <button
-                type="button"
-                onClick={() => setMode("edit")}
-                className={`rounded px-2 py-1 text-xs font-semibold ${mode === "edit" ? "bg-white text-slate-900 shadow-sm" : "text-slate-600"}`}
-              >
-                Edit Mode
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setMode("chat");
-                  setIsChatSidebarOpen(true);
-                }}
-                className={`rounded px-2 py-1 text-xs font-semibold ${mode === "chat" ? "bg-white text-slate-900 shadow-sm" : "text-slate-600"}`}
-              >
-                Chat Mode
-              </button>
-            </div>
             <button
               onClick={() => setIsChatSidebarOpen((open) => !open)}
               type="button"
@@ -359,7 +342,7 @@ export default function Editor({ initialContent, onChange }: EditorProps) {
               </span>
             ) : (
               <span className="text-xs text-slate-500">
-                {mode === "chat" ? "Chat mode active" : "Edit mode active"}
+                {isChatSidebarOpen ? `${mode === "chat" ? "Chat" : "Edit"} mode active` : "AI chat hidden"}
               </span>
             )}
           </div>
@@ -485,9 +468,13 @@ export default function Editor({ initialContent, onChange }: EditorProps) {
         <div className="h-full flex flex-col">
           <div className="px-3 py-3 border-b border-slate-200 bg-white/90 backdrop-blur">
             <div className="flex items-center justify-between gap-2">
-              <div>
+              <div className="min-w-0">
                 <p className="text-sm font-semibold text-slate-900">AI Chat</p>
-                <p className="text-xs text-slate-500">Chat mode with document context</p>
+                <p className="text-xs text-slate-500">
+                  {mode === "edit"
+                    ? "Edit mode: replies are optimized for direct document updates"
+                    : "Chat mode: discuss and refine before applying changes"}
+                </p>
               </div>
               <div className="flex items-center gap-2">
                 <button
@@ -507,6 +494,22 @@ export default function Editor({ initialContent, onChange }: EditorProps) {
                   Hide
                 </button>
               </div>
+            </div>
+            <div className="mt-3 inline-flex items-center rounded-md border border-slate-200 bg-slate-50 p-0.5">
+              <button
+                type="button"
+                onClick={() => setMode("edit")}
+                className={`rounded px-2 py-1 text-xs font-semibold ${mode === "edit" ? "bg-white text-slate-900 shadow-sm" : "text-slate-600"}`}
+              >
+                Edit Mode
+              </button>
+              <button
+                type="button"
+                onClick={() => setMode("chat")}
+                className={`rounded px-2 py-1 text-xs font-semibold ${mode === "chat" ? "bg-white text-slate-900 shadow-sm" : "text-slate-600"}`}
+              >
+                Chat Mode
+              </button>
             </div>
           </div>
           <div ref={messagesRef} className="flex-1 overflow-y-auto px-3 py-3 space-y-3">
