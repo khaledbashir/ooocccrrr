@@ -8,6 +8,7 @@ This app provides:
 - OCR/extraction requests to Ollama GLM-OCR (optional, selectable in UI)
 - OCR/extraction requests to Marker API (optional, selectable in UI)
 - OCR/extraction requests to Docling API (optional, selectable in UI)
+- AI editing actions inside BlockNote (`Summarize`, `Improve`, `Expand`)
 - Extraction history stored with Prisma
 - PDF page export as individual PNG images (no zip)
 
@@ -30,10 +31,43 @@ KREUZBERG_URL=https://basheer-kreuz.prd42b.easypanel.host
 MISTRAL_API_BASE_URL=https://api.mistral.ai
 MISTRAL_OCR_MODEL=mistral-ocr-latest
 MISTRAL_API_KEY=
+ZAI_API_BASE_URL=https://api.z.ai/api/coding/paas/v4
+ZAI_API_KEY=
+ZAI_MODEL=glm-4.5
+NVIDIA_API_BASE_URL=https://integrate.api.nvidia.com/v1
+NVIDIA_API_KEY=
+NVIDIA_MODEL=meta/llama-3.1-70b-instruct
+GROQ_API_BASE_URL=https://api.groq.com/openai/v1
+GROQ_API_KEY=
+GROQ_MODEL=llama-3.3-70b-versatile
 OLLAMA_BASE_URL=http://localhost:11434
 OLLAMA_GLM_OCR_MODEL=glm-ocr:latest
 MARKER_URL=http://localhost:8080
 DOCLING_URL=http://localhost:5001
+```
+
+## AI in Editor
+
+The BlockNote editor includes built-in AI actions:
+
+- `Summarize`
+- `Improve`
+- `Expand`
+
+These call `POST /api/ai` and apply the returned markdown back into the editor.
+
+Required env vars for AI:
+
+```env
+ZAI_API_BASE_URL=https://api.z.ai/api/coding/paas/v4
+ZAI_API_KEY=
+ZAI_MODEL=glm-4.5
+NVIDIA_API_BASE_URL=https://integrate.api.nvidia.com/v1
+NVIDIA_API_KEY=
+NVIDIA_MODEL=meta/llama-3.1-70b-instruct
+GROQ_API_BASE_URL=https://api.groq.com/openai/v1
+GROQ_API_KEY=
+GROQ_MODEL=llama-3.3-70b-versatile
 ```
 
 ## OCR providers
@@ -77,6 +111,15 @@ DOCLING_URL=https://your-docling-domain.example
 MISTRAL_API_BASE_URL=https://api.mistral.ai
 MISTRAL_OCR_MODEL=mistral-ocr-latest
 MISTRAL_API_KEY=
+ZAI_API_BASE_URL=https://api.z.ai/api/coding/paas/v4
+ZAI_API_KEY=
+ZAI_MODEL=glm-4.5
+NVIDIA_API_BASE_URL=https://integrate.api.nvidia.com/v1
+NVIDIA_API_KEY=
+NVIDIA_MODEL=meta/llama-3.1-70b-instruct
+GROQ_API_BASE_URL=https://api.groq.com/openai/v1
+GROQ_API_KEY=
+GROQ_MODEL=llama-3.3-70b-versatile
 OLLAMA_BASE_URL=http://localhost:11434
 OLLAMA_GLM_OCR_MODEL=glm-ocr:latest
 ```
