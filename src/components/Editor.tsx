@@ -4,8 +4,21 @@ import "@blocknote/core/fonts/inter.css";
 import { useCreateBlockNote } from "@blocknote/react";
 import { BlockNoteView } from "@blocknote/mantine";
 import "@blocknote/mantine/style.css";
-import { useEffect, useState } from "react";
-import { Sparkles, Loader2, ChevronDown, ChevronRight, PanelRightClose, PanelRightOpen, Send } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import {
+  Sparkles,
+  Loader2,
+  ChevronDown,
+  ChevronRight,
+  PanelRightClose,
+  PanelRightOpen,
+  Send,
+  MessageSquarePlus,
+  Copy,
+  Check,
+  Bot,
+  UserCircle2,
+} from "lucide-react";
 import { EditorProps } from "@/types";
 
 type AiAction = "summarize" | "improve" | "expand" | "custom";
@@ -25,6 +38,7 @@ type ChatMessage = {
   id: string;
   role: "user" | "assistant";
   text: string;
+  createdAt: number;
 };
 
 type EditorMode = "edit" | "chat";
@@ -53,8 +67,24 @@ function blocksToPlainText(blocks: EditorBlock[]): string {
     .trim();
 }
 
+function initialChatMessages(): ChatMessage[] {
+  return [
+    {
+      id: "chat-welcome",
+      role: "assistant",
+      text: "I am ready. Ask me to rewrite, summarize, extract requirements, or create a checklist from this document.",
+      createdAt: Date.now(),
+    },
+  ];
+}
+
+function formatTime(timestamp: number) {
+  return new Date(timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
 export default function Editor({ initialContent, onChange }: EditorProps) {
   const editor = useCreateBlockNote();
+  const messagesRef = useRef<HTMLDivElement>(null);
   const [isRunningAi, setIsRunningAi] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
   const [provider, setProvider] = useState<AiProvider>("groq");
@@ -67,13 +97,8 @@ export default function Editor({ initialContent, onChange }: EditorProps) {
   const [isChatSidebarOpen, setIsChatSidebarOpen] = useState(false);
   const [mode, setMode] = useState<EditorMode>("edit");
   const [chatInput, setChatInput] = useState("");
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
-    {
-      id: "chat-welcome",
-      role: "assistant",
-      text: "AI chat is ready. Ask for edits, rewrites, summaries, or next steps.",
-    },
-  ]);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>(initialChatMessages);
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
 
   useEffect(() => {
     async function loadContent() {
@@ -124,6 +149,11 @@ export default function Editor({ initialContent, onChange }: EditorProps) {
 
     loadModels();
   }, [provider]);
+
+  useEffect(() => {
+    if (!messagesRef.current) return;
+    messagesRef.current.scrollTop = messagesRef.current.scrollHeight;
+  }, [chatMessages, isRunningAi]);
 
   async function runAi(action: AiAction) {
     if (isRunningAi) return;
@@ -193,8 +223,10 @@ export default function Editor({ initialContent, onChange }: EditorProps) {
       id: `user-${Date.now()}`,
       role: "user",
       text: prompt,
+      createdAt: Date.now(),
     };
-    setChatMessages((current) => [...current, userMessage]);
+    const nextMessages = [...chatMessages, userMessage];
+    setChatMessages(nextMessages);
 
     const blocks = editor.document as unknown as EditorBlock[];
     const currentPlainText = blocksToPlainText(blocks);
@@ -210,8 +242,14 @@ export default function Editor({ initialContent, onChange }: EditorProps) {
           model: model || undefined,
           instruction: [
             "You are an AI document copilot in chat mode.",
-            "Respond as a concise assistant in markdown.",
+            "Respond as a concise assistant in markdown with clear structure.",
             "If the user asks to edit the document, provide the full revised markdown so it can be applied directly.",
+            "Preserve key numbers and entities from the document unless the user asks otherwise.",
+            "Recent chat context:",
+            nextMessages
+              .slice(-8)
+              .map((message) => `${message.role.toUpperCase()}: ${message.text}`)
+              .join("\n"),
             `User message: ${prompt}`,
           ].join("\n"),
           webSearchQuery: webSearchQuery.trim() || undefined,
@@ -232,6 +270,7 @@ export default function Editor({ initialContent, onChange }: EditorProps) {
         id: `assistant-${Date.now()}`,
         role: "assistant",
         text: aiText,
+        createdAt: Date.now(),
       };
       setChatMessages((current) => [...current, assistantMessage]);
     } catch (error: unknown) {
@@ -243,12 +282,36 @@ export default function Editor({ initialContent, onChange }: EditorProps) {
           id: `assistant-error-${Date.now()}`,
           role: "assistant",
           text: `Error: ${message}`,
+          createdAt: Date.now(),
         },
       ]);
     } finally {
       setIsRunningAi(false);
     }
   }
+
+  function resetChat() {
+    setChatMessages(initialChatMessages());
+    setChatInput("");
+    setAiError(null);
+  }
+
+  async function copyMessage(messageId: string, text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedMessageId(messageId);
+      window.setTimeout(() => setCopiedMessageId((current) => (current === messageId ? null : current)), 1400);
+    } catch {
+      setAiError("Could not copy message to clipboard.");
+    }
+  }
+
+  const quickPrompts = [
+    "Extract mandatory submission requirements.",
+    "Turn this into a bid checklist.",
+    "List high-risk compliance items.",
+    "Rewrite as executive summary.",
+  ];
 
   return (
     <div className="doc-editor h-full w-full bg-white flex overflow-hidden">
@@ -415,46 +478,130 @@ export default function Editor({ initialContent, onChange }: EditorProps) {
       </div>
 
       <aside
-        className={`h-full border-l border-slate-200 bg-slate-50 transition-all duration-300 ${
-          isChatSidebarOpen ? "w-full md:w-[380px]" : "w-0 overflow-hidden border-l-0"
+        className={`h-full border-l border-slate-200 bg-gradient-to-b from-slate-50 to-slate-100 transition-all duration-300 ${
+          isChatSidebarOpen ? "w-full md:w-[430px]" : "w-0 overflow-hidden border-l-0"
         }`}
       >
         <div className="h-full flex flex-col">
-          <div className="px-3 py-2 border-b border-slate-200 bg-white">
-            <p className="text-sm font-semibold text-slate-800">AI Chat</p>
-            <p className="text-xs text-slate-500">Ask for edits, rewrites, or suggestions.</p>
+          <div className="px-3 py-3 border-b border-slate-200 bg-white/90 backdrop-blur">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <p className="text-sm font-semibold text-slate-900">AI Chat</p>
+                <p className="text-xs text-slate-500">Chat mode with document context</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={resetChat}
+                  className="inline-flex items-center gap-1 rounded-md border border-slate-200 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  <MessageSquarePlus size={12} />
+                  New Chat
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsChatSidebarOpen(false)}
+                  className="inline-flex items-center gap-1 rounded-md border border-slate-200 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  <PanelRightClose size={12} />
+                  Hide
+                </button>
+              </div>
+            </div>
           </div>
-          <div className="flex-1 overflow-y-auto px-3 py-3 space-y-3">
+          <div ref={messagesRef} className="flex-1 overflow-y-auto px-3 py-3 space-y-3">
             {chatMessages.map((message) => (
-              <div
-                key={message.id}
-                className={`rounded-lg px-3 py-2 text-sm whitespace-pre-wrap ${
-                  message.role === "user"
-                    ? "bg-indigo-600 text-white ml-8"
-                    : "bg-white text-slate-700 border border-slate-200 mr-8"
-                }`}
-              >
-                {message.text}
-                {message.role === "assistant" && !message.text.startsWith("Error:") ? (
-                  <div className="mt-2">
-                    <button
-                      type="button"
-                      className="text-xs rounded border border-slate-200 px-2 py-1 hover:bg-slate-100"
-                      onClick={() => void applyMarkdownToEditor(message.text)}
-                    >
-                      Apply to editor
-                    </button>
+              <div key={message.id} className={`flex gap-2 ${message.role === "user" ? "justify-end" : "justify-start"}`}>
+                {message.role === "assistant" ? (
+                  <div className="mt-1 h-7 w-7 rounded-full bg-slate-800 text-white flex items-center justify-center shrink-0">
+                    <Bot size={14} />
+                  </div>
+                ) : null}
+                <div
+                  className={`max-w-[85%] rounded-2xl px-3 py-2 shadow-sm ${
+                    message.role === "user"
+                      ? "bg-slate-900 text-white rounded-tr-sm"
+                      : "bg-white text-slate-700 border border-slate-200 rounded-tl-sm"
+                  }`}
+                >
+                  <p className="text-sm leading-6 whitespace-pre-wrap break-words">{message.text}</p>
+                  <div className="mt-2 flex items-center justify-between gap-2">
+                    <span className={`text-[11px] ${message.role === "user" ? "text-slate-300" : "text-slate-400"}`}>
+                      {formatTime(message.createdAt)}
+                    </span>
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        className={`text-[11px] rounded px-2 py-1 ${
+                          message.role === "user"
+                            ? "bg-white/15 text-white hover:bg-white/25"
+                            : "border border-slate-200 text-slate-600 hover:bg-slate-100"
+                        }`}
+                        onClick={() => void copyMessage(message.id, message.text)}
+                      >
+                        {copiedMessageId === message.id ? (
+                          <span className="inline-flex items-center gap-1">
+                            <Check size={11} />
+                            Copied
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1">
+                            <Copy size={11} />
+                            Copy
+                          </span>
+                        )}
+                      </button>
+                      {message.role === "assistant" && !message.text.startsWith("Error:") ? (
+                        <button
+                          type="button"
+                          className="text-[11px] rounded border border-slate-200 px-2 py-1 text-slate-600 hover:bg-slate-100"
+                          onClick={() => void applyMarkdownToEditor(message.text)}
+                        >
+                          Apply
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+                {message.role === "user" ? (
+                  <div className="mt-1 h-7 w-7 rounded-full bg-slate-200 text-slate-700 flex items-center justify-center shrink-0">
+                    <UserCircle2 size={14} />
                   </div>
                 ) : null}
               </div>
             ))}
+            {isRunningAi ? (
+              <div className="flex gap-2 items-center">
+                <div className="h-7 w-7 rounded-full bg-slate-800 text-white flex items-center justify-center shrink-0">
+                  <Bot size={14} />
+                </div>
+                <div className="rounded-2xl rounded-tl-sm bg-white border border-slate-200 px-3 py-2 text-sm text-slate-500">
+                  <span className="inline-flex items-center gap-2">
+                    <Loader2 size={14} className="animate-spin" />
+                    Thinking...
+                  </span>
+                </div>
+              </div>
+            ) : null}
           </div>
           <div className="border-t border-slate-200 bg-white p-3 space-y-2">
+            <div className="flex gap-2 overflow-x-auto pb-1">
+              {quickPrompts.map((prompt) => (
+                <button
+                  key={prompt}
+                  type="button"
+                  onClick={() => setChatInput(prompt)}
+                  className="shrink-0 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[11px] font-medium text-slate-600 hover:bg-slate-100"
+                >
+                  {prompt}
+                </button>
+              ))}
+            </div>
             <textarea
               value={chatInput}
               onChange={(e) => setChatInput(e.target.value)}
               placeholder="Ask AI to edit this document..."
-              className="w-full min-h-20 rounded-md border border-slate-200 p-2 text-sm text-slate-700"
+              className="w-full min-h-24 rounded-xl border border-slate-200 p-3 text-sm text-slate-700 bg-slate-50/70 focus:outline-none focus:ring-2 focus:ring-slate-300"
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
@@ -462,15 +609,18 @@ export default function Editor({ initialContent, onChange }: EditorProps) {
                 }
               }}
             />
-            <button
-              type="button"
-              onClick={() => void sendChatMessage()}
-              disabled={isRunningAi || isLoadingModels}
-              className="inline-flex items-center gap-1.5 rounded-md bg-slate-900 text-white px-3 py-1.5 text-xs font-semibold hover:bg-slate-800 disabled:opacity-60"
-            >
-              {isRunningAi ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
-              Send
-            </button>
+            <div className="flex items-center justify-between">
+              <p className="text-[11px] text-slate-500">Enter to send, Shift+Enter for newline</p>
+              <button
+                type="button"
+                onClick={() => void sendChatMessage()}
+                disabled={isRunningAi || isLoadingModels || !chatInput.trim()}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 text-white px-4 py-2 text-xs font-semibold hover:bg-slate-800 disabled:opacity-50"
+              >
+                {isRunningAi ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+                Send
+              </button>
+            </div>
           </div>
         </div>
       </aside>
