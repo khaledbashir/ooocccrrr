@@ -12,6 +12,13 @@ async function parseJsonSafely(response: Response) {
   }
 }
 
+function normalizeErrorMessage(message: string): string {
+  if (/<(?:!doctype|html|head|body)\b/i.test(message)) {
+    return 'Upstream OCR service returned an HTML error page. Verify the provider URL and ensure the service is running.';
+  }
+  return message;
+}
+
 export function useFileProcessor() {
   const [state, setState] = useState<FileProcessingState>({
     file: null,
@@ -69,7 +76,6 @@ export function useFileProcessor() {
   const extractContent = useCallback(async (ocrProvider: OcrProvider) => {
     if (!state.file) return;
 
-    const isPdf = isPdfFile(state.file.type, state.file.name);
     const isImage = isImageFile(state.file.type);
 
     if (ocrProvider === 'ollama_glm_ocr' && !isImage) {
@@ -98,7 +104,7 @@ export function useFileProcessor() {
         if (errorData.error && errorData.error.includes('Unsupported file type')) {
           throw new Error(ERROR_MESSAGES.UNSUPPORTED_FILE_TYPE);
         }
-        throw new Error(errorData.error || 'Extraction failed');
+        throw new Error(normalizeErrorMessage(errorData.error || 'Extraction failed'));
       }
       
       const data = await parseJsonSafely(response);
@@ -111,11 +117,13 @@ export function useFileProcessor() {
         extractedContent: extractDisplayContent(data.data),
         isExtracting: false,
       }));
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const errorMessage =
+        error instanceof Error ? error.message : ERROR_MESSAGES.UPSTREAM_REQUEST_FAILED;
       console.error('Extraction failed', error);
       setState(prev => ({
         ...prev,
-        error: error.message || ERROR_MESSAGES.UPSTREAM_REQUEST_FAILED,
+        error: normalizeErrorMessage(errorMessage),
         isExtracting: false,
       }));
     }

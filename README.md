@@ -6,6 +6,8 @@ This app provides:
 - OCR/extraction requests to Kreuzberg API
 - OCR/extraction requests to Mistral API (optional, selectable in UI)
 - OCR/extraction requests to Ollama GLM-OCR (optional, selectable in UI)
+- OCR/extraction requests to Marker API (optional, selectable in UI)
+- OCR/extraction requests to Docling API (optional, selectable in UI)
 - Extraction history stored with Prisma
 - PDF page export as individual PNG images (no zip)
 
@@ -30,6 +32,8 @@ MISTRAL_OCR_MODEL=mistral-ocr-latest
 MISTRAL_API_KEY=
 OLLAMA_BASE_URL=http://localhost:11434
 OLLAMA_GLM_OCR_MODEL=glm-ocr:latest
+MARKER_URL=http://localhost:8080
+DOCLING_URL=http://localhost:5001
 ```
 
 ## OCR providers
@@ -37,12 +41,15 @@ OLLAMA_GLM_OCR_MODEL=glm-ocr:latest
 The upload panel has an OCR provider selector:
 
 - `Kreuzberg OCR` (default)
+- `Marker (Best Formatting)`
+- `Docling (Precise Tables)`
 - `GLM-OCR (Ollama)` (image OCR only in current app flow)
 - `Mistral OCR` (requires `MISTRAL_API_KEY`)
 
 Provider choice is sent per upload request so all providers can coexist.
 
 If you choose `GLM-OCR (Ollama)`, Ollama must be running and reachable from the app host.
+If you choose `Marker` or `Docling`, those services must also be running and reachable from the app host.
 
 Example local setup:
 
@@ -65,6 +72,13 @@ This repo includes a production `Dockerfile`.
 ```env
 DATABASE_URL=file:./dev.db
 KREUZBERG_URL=https://basheer-kreuz.prd42b.easypanel.host
+MARKER_URL=https://your-marker-domain.example
+DOCLING_URL=https://your-docling-domain.example
+MISTRAL_API_BASE_URL=https://api.mistral.ai
+MISTRAL_OCR_MODEL=mistral-ocr-latest
+MISTRAL_API_KEY=
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_GLM_OCR_MODEL=glm-ocr:latest
 ```
 
 ### 2b) Configure Kreuzberg service defaults (EasyPanel Kreuzberg container)

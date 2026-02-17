@@ -46,6 +46,44 @@ function mapFetchFailure(error: unknown, provider: OcrProvider, baseUrl: string)
   };
 }
 
+function buildUpstreamHttpError(provider: OcrProvider, baseUrl: string, response: Response, data: unknown): ApiResponse {
+  const providerName =
+    provider === 'ollama_glm_ocr'
+      ? 'Ollama GLM-OCR'
+      : provider === 'kreuzberg'
+        ? 'Kreuzberg'
+        : provider === 'mistral'
+          ? 'Mistral'
+          : provider === 'marker'
+            ? 'Marker'
+            : 'Docling';
+
+  let details = `Upstream returned ${response.status} ${response.statusText}.`;
+  const contentType = response.headers.get('content-type') ?? '';
+
+  if (typeof data === 'string') {
+    const trimmed = data.trim();
+    const isHtml = /<(?:!doctype|html|head|body)\b/i.test(trimmed);
+    if (isHtml) {
+      details = `Received an HTML error page from upstream (${response.status} ${response.statusText}), which usually means the service is unreachable or misrouted.`;
+    } else if (trimmed) {
+      details = trimmed.slice(0, 300);
+    }
+  } else if (data && typeof data === 'object' && 'error' in data && typeof (data as { error?: unknown }).error === 'string') {
+    details = (data as { error: string }).error;
+  }
+
+  return {
+    ok: false,
+    status: response.status,
+    data: {
+      error: `${providerName} extraction failed at ${baseUrl}. ${details}`,
+      contentType,
+      upstreamStatus: response.status,
+    },
+  };
+}
+
 async function extractWithKreuzberg(file: File): Promise<ApiResponse> {
   debugLog('kreuzberg', `Starting extraction for file: ${file.name} (${file.type})`);
   
@@ -86,6 +124,10 @@ async function extractWithKreuzberg(file: File): Promise<ApiResponse> {
   const data = await parseUpstreamResponse(response);
   debugLog('kreuzberg', 'Raw response data', data);
   logResponseStructure('kreuzberg', data);
+
+  if (!response.ok) {
+    return buildUpstreamHttpError('kreuzberg', API_BASE_URLS.kreuzberg, response, data);
+  }
 
   // Ensure Kreuzberg response has a consistent structure
   const extractedMarkdown = extractContentWithFallback(data);
@@ -172,6 +214,10 @@ Return ONLY the markdown-formatted text without any additional commentary.`;
   const data = await parseUpstreamResponse(response);
   debugLog('ollama_glm_ocr', 'Raw response data', data);
   logResponseStructure('ollama_glm_ocr', data);
+
+  if (!response.ok) {
+    return buildUpstreamHttpError('ollama_glm_ocr', API_BASE_URLS.ollama, response, data);
+  }
   
   // Use the fallback extraction method
   const extractedMarkdown = extractContentWithFallback(data);
@@ -247,6 +293,10 @@ async function extractWithMistral(file: File): Promise<ApiResponse> {
   debugLog('mistral', 'Response data', data);
   logResponseStructure('mistral', data);
 
+  if (!response.ok) {
+    return buildUpstreamHttpError('mistral', API_BASE_URLS.mistral, response, data);
+  }
+
   return {
     ok: response.ok,
     status: response.status,
@@ -283,14 +333,8 @@ async function extractWithMarker(file: File): Promise<ApiResponse> {
   logResponseStructure('marker', data);
 
   if (!response.ok) {
-    debugLog('marker', 'Marker service error');
-    return {
-      ok: false,
-      status: response.status,
-      data: {
-        error: `Marker service failed with status ${response.status}`,
-      },
-    };
+    debugLog('marker', 'Marker service error', data);
+    return buildUpstreamHttpError('marker', API_BASE_URLS.marker, response, data);
   }
 
   // Marker returns markdown in 'text' or 'markdown' field according to docs
@@ -336,14 +380,8 @@ async function extractWithDocling(file: File): Promise<ApiResponse> {
   logResponseStructure('docling', data);
 
   if (!response.ok) {
-    debugLog('docling', 'Docling service error');
-    return {
-      ok: false,
-      status: response.status,
-      data: {
-        error: `Docling service failed with status ${response.status}`,
-      },
-    };
+    debugLog('docling', 'Docling service error', data);
+    return buildUpstreamHttpError('docling', API_BASE_URLS.docling, response, data);
   }
 
   // Docling returns structured markdown with excellent table preservation

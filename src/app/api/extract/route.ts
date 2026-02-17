@@ -31,9 +31,14 @@ export async function POST(req: Request): Promise<NextResponse<ExtractionRespons
     const upstream: ApiResponse = await extractContent(normalizedFile, provider);
 
     if (!upstream.ok) {
+      const upstreamMessage =
+        upstream.data && typeof upstream.data === 'object' && 'error' in upstream.data && typeof (upstream.data as { error?: unknown }).error === 'string'
+          ? (upstream.data as { error: string }).error
+          : `Upstream extract failed with status ${upstream.status}`;
+
       return NextResponse.json(
         {
-          error: `Upstream extract failed with status ${upstream.status}`,
+          error: upstreamMessage,
           provider,
           upstream: upstream.data,
         },
