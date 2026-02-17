@@ -17,7 +17,8 @@ import {
   Filter,
   CheckCircle2,
   AlertTriangle,
-  CircleOff
+  CircleOff,
+  ShieldAlert
 } from "lucide-react";
 import axios from "axios";
 import dynamic from "next/dynamic";
@@ -26,6 +27,7 @@ import "@mantine/core/styles.css";
 
 import { OcrProvider, API_BASE_URLS } from "@/lib/constants";
 import { extractDisplayContent } from "@/lib/utils";
+import { RelevanceLabel, scoreRfpChunk, splitIntoChunks, toChunkTitle } from "@/lib/rfpFilter";
 import { useFileProcessor } from "@/hooks/useFileProcessor";
 import { usePdfExport } from "@/hooks/usePdfExport";
 import { HistoryItem } from "@/types";
@@ -34,8 +36,6 @@ import { HistoryItem } from "@/types";
 const Editor = dynamic(() => import("@/components/Editor"), { ssr: false });
 const PdfHoverPreview = dynamic(() => import("@/components/PdfHoverPreview"), { ssr: false });
 
-type RelevanceLabel = "relevant" | "maybe" | "irrelevant";
-
 type RelevanceChunk = {
   id: string;
   title: string;
@@ -43,6 +43,9 @@ type RelevanceChunk = {
   label: RelevanceLabel;
   score: number;
   reason: string;
+  categoryHits: string[];
+  riskHits: string[];
+  matchedKeywords: string[];
 };
 
 type RelevanceSummary = {
@@ -52,110 +55,12 @@ type RelevanceSummary = {
   relevant: number;
   maybe: number;
   irrelevant: number;
+  riskFlagged: number;
   chunks: RelevanceChunk[];
   relevantContent: string;
 };
 
 type EditorSourceMode = "full" | "relevant" | "blank";
-
-const POSITIVE_KEYWORDS = [
-  "stadium",
-  "arena",
-  "scoreboard",
-  "video board",
-  "sound system",
-  "audio visual",
-  "broadcast",
-  "network infrastructure",
-  "it infrastructure",
-  "security system",
-  "cctv",
-  "access control",
-  "low voltage",
-  "structured cabling",
-  "integration",
-  "commissioning",
-  "operations technology",
-  "av system",
-];
-
-const NEGATIVE_KEYWORDS = [
-  "plumbing",
-  "landscaping",
-  "asbestos",
-  "roofing only",
-  "concrete paving only",
-  "elevator maintenance",
-  "painting only",
-  "janitorial",
-  "food service only",
-];
-
-function toChunkTitle(text: string, index: number) {
-  const heading = text
-    .split("\n")
-    .map((line) => line.trim())
-    .find((line) => line.length > 0 && line.length < 100);
-  return heading || `Section ${index + 1}`;
-}
-
-function splitIntoChunks(rawText: string) {
-  const normalized = rawText.trim();
-  if (!normalized) return [];
-
-  if (normalized.includes("\n\n---\n\n")) {
-    return normalized
-      .split("\n\n---\n\n")
-      .map((part) => part.trim())
-      .filter(Boolean);
-  }
-
-  return normalized
-    .split(/\n{2,}/)
-    .map((part) => part.trim())
-    .filter((part) => part.length > 80);
-}
-
-function classifyChunk(text: string) {
-  const hay = text.toLowerCase();
-  let score = 0;
-  const reasons: string[] = [];
-
-  for (const keyword of POSITIVE_KEYWORDS) {
-    if (hay.includes(keyword)) {
-      score += 2;
-      reasons.push(`contains "${keyword}"`);
-    }
-  }
-  for (const keyword of NEGATIVE_KEYWORDS) {
-    if (hay.includes(keyword)) {
-      score -= 2;
-      reasons.push(`contains "${keyword}"`);
-    }
-  }
-  if (hay.includes("mandatory") || hay.includes("must")) {
-    score += 1;
-    reasons.push("includes mandatory language");
-  }
-  if (hay.includes("deadline") || hay.includes("due date") || hay.includes("submission")) {
-    score += 1;
-    reasons.push("contains submission/deadline requirements");
-  }
-  if (hay.includes("addendum") || hay.includes("compliance") || hay.includes("insurance")) {
-    score += 1;
-    reasons.push("contains risk/compliance terms");
-  }
-
-  let label: RelevanceLabel = "irrelevant";
-  if (score >= 3) label = "relevant";
-  else if (score >= 1) label = "maybe";
-
-  return {
-    label,
-    score,
-    reason: reasons.slice(0, 3).join(", ") || "no strong indicators",
-  };
-}
 
 export default function Home() {
   const [history, setHistory] = useState<HistoryItem[]>([]);
@@ -174,6 +79,7 @@ export default function Home() {
     relevant: 0,
     maybe: 0,
     irrelevant: 0,
+    riskFlagged: 0,
     chunks: [],
     relevantContent: "",
   });
@@ -280,6 +186,7 @@ export default function Home() {
         relevant: 0,
         maybe: 0,
         irrelevant: 0,
+        riskFlagged: 0,
         chunks: [],
         relevantContent: "",
       });
@@ -298,6 +205,7 @@ export default function Home() {
       relevant: 0,
       maybe: 0,
       irrelevant: 0,
+      riskFlagged: 0,
       chunks: [],
       relevantContent: "",
     });
@@ -318,6 +226,7 @@ export default function Home() {
         relevant: 0,
         maybe: 0,
         irrelevant: 0,
+        riskFlagged: 0,
         chunks: [],
         relevantContent: "",
       });
@@ -332,6 +241,7 @@ export default function Home() {
       relevant: 0,
       maybe: 0,
       irrelevant: 0,
+      riskFlagged: 0,
       chunks: [],
       relevantContent: "",
     });
@@ -340,13 +250,15 @@ export default function Home() {
     let relevant = 0;
     let maybe = 0;
     let irrelevant = 0;
+    let riskFlagged = 0;
 
     for (let i = 0; i < parts.length; i += 1) {
       const chunkText = parts[i];
-      const scored = classifyChunk(chunkText);
+      const scored = scoreRfpChunk(chunkText);
       if (scored.label === "relevant") relevant += 1;
       if (scored.label === "maybe") maybe += 1;
       if (scored.label === "irrelevant") irrelevant += 1;
+      if (scored.riskHits.length > 0) riskFlagged += 1;
 
       chunks.push({
         id: `chunk-${i}`,
@@ -355,6 +267,9 @@ export default function Home() {
         label: scored.label,
         score: scored.score,
         reason: scored.reason,
+        categoryHits: scored.categoryHits,
+        riskHits: scored.riskHits,
+        matchedKeywords: scored.matchedKeywords,
       });
 
       const processed = i + 1;
@@ -366,6 +281,7 @@ export default function Home() {
           relevant,
           maybe,
           irrelevant,
+          riskFlagged,
           chunks: [...chunks],
         }));
         await new Promise((resolve) => setTimeout(resolve, 0));
@@ -384,6 +300,7 @@ export default function Home() {
       relevant,
       maybe,
       irrelevant,
+      riskFlagged,
       chunks,
       relevantContent,
     });
@@ -606,7 +523,7 @@ export default function Home() {
                         style={{ width: `${relevanceSummary.progress}%` }}
                       />
                     </div>
-                    <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
+                    <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
                       <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-2 text-emerald-800">
                         <div className="flex items-center gap-1">
                           <CheckCircle2 size={13} />
@@ -627,6 +544,13 @@ export default function Home() {
                           Irrelevant
                         </div>
                         <p className="mt-1 text-base font-bold">{relevanceSummary.irrelevant}</p>
+                      </div>
+                      <div className="rounded-lg border border-rose-200 bg-rose-50 p-2 text-rose-800">
+                        <div className="flex items-center gap-1">
+                          <ShieldAlert size={13} />
+                          Risk
+                        </div>
+                        <p className="mt-1 text-base font-bold">{relevanceSummary.riskFlagged}</p>
                       </div>
                     </div>
                     <div className="mt-3 flex flex-wrap gap-2">
@@ -669,7 +593,11 @@ export default function Home() {
                               className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1.5"
                             >
                               <p className="text-xs font-semibold text-slate-800 truncate">{chunk.title}</p>
-                              <p className="text-[11px] text-slate-500 truncate">{chunk.reason}</p>
+                              <p className="text-[11px] text-slate-500 truncate">
+                                {chunk.reason}
+                                {chunk.categoryHits.length > 0 ? ` • ${chunk.categoryHits.join(", ")}` : ""}
+                                {chunk.riskHits.length > 0 ? ` • risk: ${chunk.riskHits.join(", ")}` : ""}
+                              </p>
                             </div>
                           ))}
                       </div>
