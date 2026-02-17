@@ -19,6 +19,7 @@ import {
   Bot,
   UserCircle2,
   Globe,
+  FileDown,
 } from "lucide-react";
 import { EditorProps } from "@/types";
 
@@ -92,6 +93,7 @@ export default function Editor({ initialContent, onChange }: EditorProps) {
   const [models, setModels] = useState<string[]>([]);
   const [model, setModel] = useState("");
   const [isLoadingModels, setIsLoadingModels] = useState(false);
+  const [isExportingPdf, setIsExportingPdf] = useState(false);
   const [customInstruction, setCustomInstruction] = useState("");
   const [webSearchQuery, setWebSearchQuery] = useState("");
   const [isAiToolbarOpen, setIsAiToolbarOpen] = useState(false);
@@ -296,6 +298,50 @@ export default function Editor({ initialContent, onChange }: EditorProps) {
     }
   }
 
+  async function exportToPdf() {
+    if (isExportingPdf) return;
+    const blocks = editor.document as unknown as EditorBlock[];
+    const currentPlainText = blocksToPlainText(blocks);
+    if (!currentPlainText.trim()) {
+      setAiError("Editor is empty. Add some content before exporting.");
+      return;
+    }
+
+    setAiError(null);
+    setIsExportingPdf(true);
+    try {
+      const response = await fetch("/api/export/pdf", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: "Document Export",
+          content: currentPlainText,
+          filename: "document-export",
+        }),
+      });
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => ({}))) as { error?: string };
+        throw new Error(payload.error || "Failed to export PDF.");
+      }
+
+      const pdfBlob = await response.blob();
+      const url = URL.createObjectURL(pdfBlob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "document-export.pdf";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Failed to export PDF.";
+      setAiError(message);
+    } finally {
+      setIsExportingPdf(false);
+    }
+  }
+
   function resetChat() {
     setChatMessages(initialChatMessages());
     setChatInput("");
@@ -339,6 +385,15 @@ export default function Editor({ initialContent, onChange }: EditorProps) {
             >
               {isChatSidebarOpen ? <PanelRightClose size={14} /> : <PanelRightOpen size={14} />}
               AI Chat
+            </button>
+            <button
+              onClick={() => void exportToPdf()}
+              type="button"
+              disabled={isExportingPdf}
+              className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+            >
+              {isExportingPdf ? <Loader2 size={14} className="animate-spin" /> : <FileDown size={14} />}
+              Export PDF
             </button>
             {aiError ? (
               <span className="text-xs text-red-600 truncate" title={aiError}>
