@@ -172,6 +172,7 @@ export default function Home() {
   const [isEditorOpen, setIsEditorOpen] = useState(true);
   const [previewMode, setPreviewMode] = useState<"auto" | "on-demand">("auto");
   const [isPreviewVisible, setIsPreviewVisible] = useState(true);
+  const [activeExcelSheet, setActiveExcelSheet] = useState("");
   const [ocrProvider, setOcrProvider] = useState<OcrProvider>("kreuzberg");
   const [editorEnabled, setEditorEnabled] = useState(false);
   const [editorSourceMode, setEditorSourceMode] = useState<EditorSourceMode>("full");
@@ -204,6 +205,7 @@ export default function Home() {
     file,
     previewUrl,
     excelData,
+    excelSheets,
     isExtracting,
     extractedContent,
     jsonResult,
@@ -216,6 +218,25 @@ export default function Home() {
   } = useFileProcessor();
   
   const { isExporting, exportPdfToImages } = usePdfExport();
+
+  const workflowSteps = [
+    "Receive RFP",
+    "Extract Text",
+    "Filter Relevance",
+    "Build Workbook",
+    "Edit + Export",
+  ] as const;
+
+  const workflowIndex = (() => {
+    if (!file) return 0;
+    if (!extractedContent) return 1;
+    if (relevanceSummary.total === 0) return 2;
+    if (!structuredWorkbook) return 3;
+    return 4;
+  })();
+
+  const activeExcelSheetData =
+    excelSheets.find((sheet) => sheet.name === activeExcelSheet) || excelSheets[0] || null;
 
   const fetchHistory = useCallback(async () => {
     try {
@@ -767,6 +788,25 @@ export default function Home() {
                 </div>
               </header>
 
+              <div className="border-b border-slate-200 bg-slate-50 px-4 py-2">
+                <div className="flex items-center gap-2 overflow-x-auto">
+                  {workflowSteps.map((label, index) => (
+                    <div
+                      key={label}
+                      className={`shrink-0 rounded-full px-3 py-1 text-[11px] font-semibold ${
+                        index < workflowIndex
+                          ? "bg-emerald-100 text-emerald-800"
+                          : index === workflowIndex
+                            ? "bg-indigo-100 text-indigo-800"
+                            : "bg-white text-slate-500 border border-slate-200"
+                      }`}
+                    >
+                      {index + 1}. {label}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
               <div className="flex-1 overflow-y-auto p-6 md:p-8 flex flex-col items-center justify-center relative">
             {!file ? (
               <label
@@ -830,9 +870,30 @@ export default function Home() {
                     <div className="w-full h-full bg-white overflow-hidden">
                       <div className="h-9 bg-emerald-700 text-white text-xs font-semibold px-3 flex items-center justify-between">
                         <span className="truncate">{file.name}</span>
-                        <span>Spreadsheet Preview</span>
+                        <span>{activeExcelSheetData ? `${activeExcelSheetData.rowCount} rows` : "Spreadsheet Preview"}</span>
                       </div>
-                      <div className="h-[calc(100%-2.25rem)] overflow-auto p-4 prose prose-sm max-w-none bg-slate-50" dangerouslySetInnerHTML={{ __html: excelData }} />
+                      {excelSheets.length > 0 ? (
+                        <div className="h-9 border-b border-slate-200 bg-slate-50 px-2 flex items-center gap-2 overflow-x-auto">
+                          {excelSheets.map((sheet) => (
+                            <button
+                              key={sheet.name}
+                              type="button"
+                              onClick={() => setActiveExcelSheet(sheet.name)}
+                              className={`shrink-0 rounded-md px-2 py-1 text-[11px] font-semibold ${
+                                (activeExcelSheetData?.name || "") === sheet.name
+                                  ? "bg-white border border-emerald-200 text-emerald-700"
+                                  : "text-slate-600 hover:bg-white"
+                              }`}
+                            >
+                              {sheet.name}
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
+                      <div
+                        className="h-[calc(100%-4.5rem)] overflow-auto p-4 prose prose-sm max-w-none bg-slate-50"
+                        dangerouslySetInnerHTML={{ __html: activeExcelSheetData?.html || excelData }}
+                      />
                     </div>
                   ) : (
                     <div className="text-center p-8">

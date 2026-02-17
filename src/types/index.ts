@@ -45,6 +45,11 @@ export interface FileProcessingState {
   file: File | null;
   previewUrl: string | null;
   excelData: string | null;
+  excelSheets: Array<{
+    name: string;
+    html: string;
+    rowCount: number;
+  }>;
   isExtracting: boolean;
   extractedContent: string;
   jsonResult: any;

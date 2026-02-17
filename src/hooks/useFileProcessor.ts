@@ -24,6 +24,7 @@ export function useFileProcessor() {
     file: null,
     previewUrl: null,
     excelData: null,
+    excelSheets: [],
     isExtracting: false,
     extractedContent: '',
     jsonResult: null,
@@ -46,6 +47,7 @@ export function useFileProcessor() {
         ...prev,
         previewUrl: url,
         excelData: null,
+        excelSheets: [],
       }));
     } else if (isExcelFile(selectedFile.name)) {
       const reader = new FileReader();
@@ -56,9 +58,20 @@ export function useFileProcessor() {
           const firstSheetName = workbook.SheetNames[0];
           const worksheet = workbook.Sheets[firstSheetName];
           const html = XLSX.utils.sheet_to_html(worksheet);
+          const excelSheets = workbook.SheetNames.map((sheetName) => {
+            const sheet = workbook.Sheets[sheetName];
+            const ref = sheet["!ref"];
+            const rowCount = ref ? XLSX.utils.decode_range(ref).e.r : 0;
+            return {
+              name: sheetName,
+              html: XLSX.utils.sheet_to_html(sheet),
+              rowCount,
+            };
+          });
           setState(prev => ({
             ...prev,
             excelData: html,
+            excelSheets,
             previewUrl: null,
           }));
         });
@@ -69,6 +82,7 @@ export function useFileProcessor() {
         ...prev,
         previewUrl: null,
         excelData: null,
+        excelSheets: [],
       }));
     }
   }, []);
@@ -140,6 +154,7 @@ export function useFileProcessor() {
       file: null,
       previewUrl: null,
       excelData: null,
+      excelSheets: [],
       isExtracting: false,
       extractedContent: '',
       jsonResult: null,
