@@ -6,7 +6,6 @@ import {
   Upload,
   Download,
   History,
-  Plus,
   Loader2,
   Image as ImageIcon,
   FileSpreadsheet,
@@ -18,7 +17,10 @@ import {
   CheckCircle2,
   AlertTriangle,
   CircleOff,
-  ShieldAlert
+  ShieldAlert,
+  Eye,
+  EyeOff,
+  RotateCcw
 } from "lucide-react";
 import axios from "axios";
 import dynamic from "next/dynamic";
@@ -76,6 +78,8 @@ export default function Home() {
   const [isNavOpen, setIsNavOpen] = useState(true);
   const [isPreviewOpen, setIsPreviewOpen] = useState(true);
   const [isEditorOpen, setIsEditorOpen] = useState(true);
+  const [previewMode, setPreviewMode] = useState<"auto" | "on-demand">("auto");
+  const [isPreviewVisible, setIsPreviewVisible] = useState(true);
   const [ocrProvider, setOcrProvider] = useState<OcrProvider>("kreuzberg");
   const [editorEnabled, setEditorEnabled] = useState(false);
   const [editorSourceMode, setEditorSourceMode] = useState<EditorSourceMode>("full");
@@ -135,6 +139,7 @@ export default function Home() {
     const selectedFile = e.target.files?.[0];
     if (selectedFile) {
       processFile(selectedFile);
+      setIsPreviewVisible(previewMode === "auto");
       clearError();
     }
   };
@@ -156,6 +161,7 @@ export default function Home() {
     const droppedFile = e.dataTransfer.files?.[0];
     if (droppedFile) {
       processFile(droppedFile);
+      setIsPreviewVisible(previewMode === "auto");
       clearError();
     }
   };
@@ -235,6 +241,7 @@ export default function Home() {
         projectTitle: null,
       },
     });
+    setIsPreviewVisible(true);
   };
 
   const handleEnableEditor = () => {
@@ -353,16 +360,10 @@ export default function Home() {
           {isNavOpen ? (
             <>
               <div className="p-4 border-b flex items-center gap-2">
-                <button
-                  onClick={handleReset}
-                  className="flex-1 flex items-center justify-center gap-2 bg-red-600 text-white py-2.5 px-4 rounded-xl hover:bg-red-700 transition-all shadow-sm font-medium"
-                >
-                  <Plus size={18} />
-                  Reset All
-                </button>
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">History</p>
                 <button
                   onClick={() => setIsNavOpen(false)}
-                  className="h-10 w-10 rounded-lg border border-slate-200 text-slate-500 hover:text-slate-700 hover:bg-slate-50"
+                  className="ml-auto h-9 w-9 rounded-lg border border-slate-200 text-slate-500 hover:text-slate-700 hover:bg-slate-50"
                   title="Collapse navigation"
                 >
                   <ChevronLeft size={18} className="mx-auto" />
@@ -435,6 +436,14 @@ export default function Home() {
                   Document Preview
                 </h2>
                 <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleReset}
+                    className="inline-flex items-center gap-1.5 h-9 rounded-lg border border-red-200 bg-red-50 px-3 text-xs font-semibold text-red-700 hover:bg-red-100"
+                    title="Reset file, results and editor"
+                  >
+                    <RotateCcw size={13} />
+                    Reset
+                  </button>
                   <select
                     value={ocrProvider}
                     onChange={(e) => setOcrProvider(e.target.value as OcrProvider)}
@@ -458,6 +467,29 @@ export default function Home() {
                       {isExporting ? "Exporting..." : "Download Images"}
                     </button>
                   )}
+                  {file && (previewUrl || excelData) ? (
+                    <button
+                      onClick={() => setIsPreviewVisible((visible) => !visible)}
+                      className="inline-flex items-center gap-1.5 h-9 rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                      title={isPreviewVisible ? "Hide preview" : "Show preview"}
+                    >
+                      {isPreviewVisible ? <EyeOff size={14} /> : <Eye size={14} />}
+                      {isPreviewVisible ? "Hide Preview" : "Show Preview"}
+                    </button>
+                  ) : null}
+                  <button
+                    onClick={() =>
+                      setPreviewMode((mode) => {
+                        const next = mode === "auto" ? "on-demand" : "auto";
+                        if (next === "auto" && file) setIsPreviewVisible(true);
+                        return next;
+                      })
+                    }
+                    className="inline-flex items-center h-9 rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                    title="Toggle preview behavior"
+                  >
+                    Preview: {previewMode === "auto" ? "Auto" : "On-demand"}
+                  </button>
                   {error && (
                     <button
                       onClick={clearError}
@@ -528,12 +560,30 @@ export default function Home() {
                 </div>
                 
                 <div className="flex-1 bg-gray-100 rounded-2xl overflow-hidden border border-gray-200 shadow-inner flex items-center justify-center min-h-0">
-                  {previewUrl && file.type === "application/pdf" ? (
+                  {!isPreviewVisible ? (
+                    <div className="text-center p-8">
+                      <p className="text-sm font-semibold text-slate-700">Preview is hidden (On-demand mode)</p>
+                      <button
+                        type="button"
+                        onClick={() => setIsPreviewVisible(true)}
+                        className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                      >
+                        <Eye size={13} />
+                        Open Preview
+                      </button>
+                    </div>
+                  ) : previewUrl && file.type === "application/pdf" ? (
                     <PdfHoverPreview fileUrl={previewUrl} />
                   ) : previewUrl ? (
                     <img src={previewUrl} alt="Preview" className="max-w-full max-h-full object-contain p-4 shadow-2xl" />
                   ) : excelData ? (
-                    <div className="w-full h-full bg-white overflow-auto p-6 prose prose-sm max-w-none" dangerouslySetInnerHTML={{ __html: excelData }} />
+                    <div className="w-full h-full bg-white overflow-hidden">
+                      <div className="h-9 bg-emerald-700 text-white text-xs font-semibold px-3 flex items-center justify-between">
+                        <span className="truncate">{file.name}</span>
+                        <span>Spreadsheet Preview</span>
+                      </div>
+                      <div className="h-[calc(100%-2.25rem)] overflow-auto p-4 prose prose-sm max-w-none bg-slate-50" dangerouslySetInnerHTML={{ __html: excelData }} />
+                    </div>
                   ) : (
                     <div className="text-center p-8">
                       <FileIcon size={64} className="mx-auto text-gray-300 mb-4" />
