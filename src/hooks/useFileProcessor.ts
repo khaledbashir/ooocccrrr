@@ -3,6 +3,15 @@ import { OcrProvider, ERROR_MESSAGES } from '@/lib/constants';
 import { isExcelFile, isImageFile, isPdfFile, extractDisplayContent } from '@/lib/utils';
 import { FileProcessingState, HistoryItem } from '@/types';
 
+async function parseJsonSafely(response: Response) {
+  const text = await response.text();
+  try {
+    return text ? JSON.parse(text) : {};
+  } catch {
+    return { error: text || `Request failed with status ${response.status}` };
+  }
+}
+
 export function useFileProcessor() {
   const [state, setState] = useState<FileProcessingState>({
     file: null,
@@ -84,7 +93,7 @@ export function useFileProcessor() {
       });
       
       if (!response.ok) {
-        const errorData = await response.json();
+        const errorData = await parseJsonSafely(response);
         // Handle specific error cases
         if (errorData.error && errorData.error.includes('Unsupported file type')) {
           throw new Error(ERROR_MESSAGES.UNSUPPORTED_FILE_TYPE);
@@ -92,7 +101,10 @@ export function useFileProcessor() {
         throw new Error(errorData.error || 'Extraction failed');
       }
       
-      const data = await response.json();
+      const data = await parseJsonSafely(response);
+      if (!data || typeof data !== 'object' || !('data' in data)) {
+        throw new Error('Invalid API response format');
+      }
       setState(prev => ({
         ...prev,
         jsonResult: data.data,
