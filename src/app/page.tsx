@@ -13,7 +13,11 @@ import {
   File as FileIcon,
   ChevronLeft,
   ChevronRight,
-  Database
+  Database,
+  Filter,
+  CheckCircle2,
+  AlertTriangle,
+  CircleOff
 } from "lucide-react";
 import axios from "axios";
 import dynamic from "next/dynamic";
@@ -30,6 +34,129 @@ import { HistoryItem } from "@/types";
 const Editor = dynamic(() => import("@/components/Editor"), { ssr: false });
 const PdfHoverPreview = dynamic(() => import("@/components/PdfHoverPreview"), { ssr: false });
 
+type RelevanceLabel = "relevant" | "maybe" | "irrelevant";
+
+type RelevanceChunk = {
+  id: string;
+  title: string;
+  text: string;
+  label: RelevanceLabel;
+  score: number;
+  reason: string;
+};
+
+type RelevanceSummary = {
+  total: number;
+  processed: number;
+  progress: number;
+  relevant: number;
+  maybe: number;
+  irrelevant: number;
+  chunks: RelevanceChunk[];
+  relevantContent: string;
+};
+
+type EditorSourceMode = "full" | "relevant" | "blank";
+
+const POSITIVE_KEYWORDS = [
+  "stadium",
+  "arena",
+  "scoreboard",
+  "video board",
+  "sound system",
+  "audio visual",
+  "broadcast",
+  "network infrastructure",
+  "it infrastructure",
+  "security system",
+  "cctv",
+  "access control",
+  "low voltage",
+  "structured cabling",
+  "integration",
+  "commissioning",
+  "operations technology",
+  "av system",
+];
+
+const NEGATIVE_KEYWORDS = [
+  "plumbing",
+  "landscaping",
+  "asbestos",
+  "roofing only",
+  "concrete paving only",
+  "elevator maintenance",
+  "painting only",
+  "janitorial",
+  "food service only",
+];
+
+function toChunkTitle(text: string, index: number) {
+  const heading = text
+    .split("\n")
+    .map((line) => line.trim())
+    .find((line) => line.length > 0 && line.length < 100);
+  return heading || `Section ${index + 1}`;
+}
+
+function splitIntoChunks(rawText: string) {
+  const normalized = rawText.trim();
+  if (!normalized) return [];
+
+  if (normalized.includes("\n\n---\n\n")) {
+    return normalized
+      .split("\n\n---\n\n")
+      .map((part) => part.trim())
+      .filter(Boolean);
+  }
+
+  return normalized
+    .split(/\n{2,}/)
+    .map((part) => part.trim())
+    .filter((part) => part.length > 80);
+}
+
+function classifyChunk(text: string) {
+  const hay = text.toLowerCase();
+  let score = 0;
+  const reasons: string[] = [];
+
+  for (const keyword of POSITIVE_KEYWORDS) {
+    if (hay.includes(keyword)) {
+      score += 2;
+      reasons.push(`contains "${keyword}"`);
+    }
+  }
+  for (const keyword of NEGATIVE_KEYWORDS) {
+    if (hay.includes(keyword)) {
+      score -= 2;
+      reasons.push(`contains "${keyword}"`);
+    }
+  }
+  if (hay.includes("mandatory") || hay.includes("must")) {
+    score += 1;
+    reasons.push("includes mandatory language");
+  }
+  if (hay.includes("deadline") || hay.includes("due date") || hay.includes("submission")) {
+    score += 1;
+    reasons.push("contains submission/deadline requirements");
+  }
+  if (hay.includes("addendum") || hay.includes("compliance") || hay.includes("insurance")) {
+    score += 1;
+    reasons.push("contains risk/compliance terms");
+  }
+
+  let label: RelevanceLabel = "irrelevant";
+  if (score >= 3) label = "relevant";
+  else if (score >= 1) label = "maybe";
+
+  return {
+    label,
+    score,
+    reason: reasons.slice(0, 3).join(", ") || "no strong indicators",
+  };
+}
+
 export default function Home() {
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [activeTab, setActiveTab] = useState<"document" | "json">("document");
@@ -38,6 +165,18 @@ export default function Home() {
   const [isEditorOpen, setIsEditorOpen] = useState(true);
   const [ocrProvider, setOcrProvider] = useState<OcrProvider>("kreuzberg");
   const [editorEnabled, setEditorEnabled] = useState(false);
+  const [editorSourceMode, setEditorSourceMode] = useState<EditorSourceMode>("full");
+  const [isAnalyzingRelevance, setIsAnalyzingRelevance] = useState(false);
+  const [relevanceSummary, setRelevanceSummary] = useState<RelevanceSummary>({
+    total: 0,
+    processed: 0,
+    progress: 0,
+    relevant: 0,
+    maybe: 0,
+    irrelevant: 0,
+    chunks: [],
+    relevantContent: "",
+  });
   
   const {
     file,
@@ -66,7 +205,10 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    fetchHistory();
+    const timeoutId = window.setTimeout(() => {
+      void fetchHistory();
+    }, 0);
+    return () => window.clearTimeout(timeoutId);
   }, [fetchHistory]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -113,19 +255,140 @@ export default function Home() {
       console.warn(`${serviceName} service may not be running. Expected at: ${serviceUrl}`);
     }
     
-    await extractContent(ocrProvider);
+    const extractedText = await extractContent(ocrProvider);
+    if (extractedText) {
+      setEditorSourceMode("full");
+      setEditorEnabled(true);
+      await runRelevanceAnalysis(extractedText);
+    }
     fetchHistory();
+  };
+
+  const handleSelectHistoryItem = (item: HistoryItem) => {
+    setHistoryItem(item);
+    setEditorSourceMode("full");
+    setEditorEnabled(true);
+    try {
+      const parsed = JSON.parse(item.content);
+      const text = extractDisplayContent(parsed);
+      void runRelevanceAnalysis(text);
+    } catch {
+      setRelevanceSummary({
+        total: 0,
+        processed: 0,
+        progress: 0,
+        relevant: 0,
+        maybe: 0,
+        irrelevant: 0,
+        chunks: [],
+        relevantContent: "",
+      });
+    }
   };
 
   const handleReset = () => {
     clearFile();
     clearError();
     setEditorEnabled(false);
+    setEditorSourceMode("blank");
+    setRelevanceSummary({
+      total: 0,
+      processed: 0,
+      progress: 0,
+      relevant: 0,
+      maybe: 0,
+      irrelevant: 0,
+      chunks: [],
+      relevantContent: "",
+    });
   };
 
   const handleEnableEditor = () => {
     setEditorEnabled(true);
+    setEditorSourceMode("blank");
   };
+
+  const runRelevanceAnalysis = useCallback(async (rawText: string) => {
+    const parts = splitIntoChunks(rawText);
+    if (parts.length === 0) {
+      setRelevanceSummary({
+        total: 0,
+        processed: 0,
+        progress: 0,
+        relevant: 0,
+        maybe: 0,
+        irrelevant: 0,
+        chunks: [],
+        relevantContent: "",
+      });
+      return;
+    }
+
+    setIsAnalyzingRelevance(true);
+    setRelevanceSummary({
+      total: parts.length,
+      processed: 0,
+      progress: 0,
+      relevant: 0,
+      maybe: 0,
+      irrelevant: 0,
+      chunks: [],
+      relevantContent: "",
+    });
+
+    const chunks: RelevanceChunk[] = [];
+    let relevant = 0;
+    let maybe = 0;
+    let irrelevant = 0;
+
+    for (let i = 0; i < parts.length; i += 1) {
+      const chunkText = parts[i];
+      const scored = classifyChunk(chunkText);
+      if (scored.label === "relevant") relevant += 1;
+      if (scored.label === "maybe") maybe += 1;
+      if (scored.label === "irrelevant") irrelevant += 1;
+
+      chunks.push({
+        id: `chunk-${i}`,
+        title: toChunkTitle(chunkText, i),
+        text: chunkText,
+        label: scored.label,
+        score: scored.score,
+        reason: scored.reason,
+      });
+
+      const processed = i + 1;
+      if (processed % 8 === 0 || processed === parts.length) {
+        setRelevanceSummary((prev) => ({
+          ...prev,
+          processed,
+          progress: Math.round((processed / parts.length) * 100),
+          relevant,
+          maybe,
+          irrelevant,
+          chunks: [...chunks],
+        }));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+    }
+
+    const relevantContent = chunks
+      .filter((chunk) => chunk.label !== "irrelevant")
+      .map((chunk) => `## ${chunk.title}\n\n${chunk.text}`)
+      .join("\n\n---\n\n");
+
+    setRelevanceSummary({
+      total: parts.length,
+      processed: parts.length,
+      progress: 100,
+      relevant,
+      maybe,
+      irrelevant,
+      chunks,
+      relevantContent,
+    });
+    setIsAnalyzingRelevance(false);
+  }, []);
 
   return (
     <MantineProvider>
@@ -162,7 +425,7 @@ export default function Home() {
                     <button
                       key={item.id}
                       onClick={() => {
-                        setHistoryItem(item);
+                        handleSelectHistoryItem(item);
                       }}
                       className="w-full text-left p-3 rounded-lg hover:bg-gray-50 border border-transparent hover:border-gray-200 transition-all group"
                     >
@@ -323,6 +586,96 @@ export default function Home() {
                     </div>
                   )}
                 </div>
+
+                {(isAnalyzingRelevance || relevanceSummary.total > 0) && (
+                  <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2">
+                        <Filter size={16} className="text-indigo-600" />
+                        <p className="text-sm font-semibold text-slate-900">RFP Relevance Filter</p>
+                      </div>
+                      <p className="text-xs text-slate-500">
+                        {isAnalyzingRelevance
+                          ? `Analyzing ${relevanceSummary.processed}/${relevanceSummary.total}`
+                          : `Done • ${relevanceSummary.total} sections`}
+                      </p>
+                    </div>
+                    <div className="mt-3 h-2 rounded-full bg-slate-100 overflow-hidden">
+                      <div
+                        className="h-full bg-indigo-600 transition-all"
+                        style={{ width: `${relevanceSummary.progress}%` }}
+                      />
+                    </div>
+                    <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
+                      <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-2 text-emerald-800">
+                        <div className="flex items-center gap-1">
+                          <CheckCircle2 size={13} />
+                          Relevant
+                        </div>
+                        <p className="mt-1 text-base font-bold">{relevanceSummary.relevant}</p>
+                      </div>
+                      <div className="rounded-lg border border-amber-200 bg-amber-50 p-2 text-amber-800">
+                        <div className="flex items-center gap-1">
+                          <AlertTriangle size={13} />
+                          Maybe
+                        </div>
+                        <p className="mt-1 text-base font-bold">{relevanceSummary.maybe}</p>
+                      </div>
+                      <div className="rounded-lg border border-slate-200 bg-slate-50 p-2 text-slate-700">
+                        <div className="flex items-center gap-1">
+                          <CircleOff size={13} />
+                          Irrelevant
+                        </div>
+                        <p className="mt-1 text-base font-bold">{relevanceSummary.irrelevant}</p>
+                      </div>
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!relevanceSummary.relevantContent) return;
+                          setEditorSourceMode("relevant");
+                          setIsEditorOpen(true);
+                          setActiveTab("document");
+                          setEditorEnabled(true);
+                        }}
+                        disabled={!relevanceSummary.relevantContent || isAnalyzingRelevance}
+                        className="rounded-lg bg-indigo-600 text-white px-3 py-2 text-xs font-semibold hover:bg-indigo-700 disabled:opacity-50"
+                      >
+                        Open Relevant in Editor
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditorSourceMode("full");
+                          setIsEditorOpen(true);
+                          setActiveTab("document");
+                          setEditorEnabled(true);
+                        }}
+                        disabled={!extractedContent}
+                        className="rounded-lg border border-slate-200 bg-white text-slate-700 px-3 py-2 text-xs font-semibold hover:bg-slate-50"
+                      >
+                        Open Full Document
+                      </button>
+                    </div>
+                    {relevanceSummary.chunks.length > 0 && (
+                      <div className="mt-3 max-h-32 overflow-auto space-y-1">
+                        {relevanceSummary.chunks
+                          .filter((chunk) => chunk.label !== "irrelevant")
+                          .slice(0, 5)
+                          .map((chunk) => (
+                            <div
+                              key={chunk.id}
+                              className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1.5"
+                            >
+                              <p className="text-xs font-semibold text-slate-800 truncate">{chunk.title}</p>
+                              <p className="text-[11px] text-slate-500 truncate">{chunk.reason}</p>
+                            </div>
+                          ))}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
 
@@ -391,31 +744,39 @@ export default function Home() {
               </header>
 
               <div className="flex-1 overflow-hidden">
-            {activeTab === "document" ? (
-              extractedContent ? (
-                <Editor initialContent={extractedContent} />
-              ) : editorEnabled ? (
-                <Editor initialContent="" />
+            {(() => {
+              const selectedEditorContent =
+                editorSourceMode === "relevant"
+                  ? relevanceSummary.relevantContent
+                  : editorSourceMode === "full"
+                    ? extractedContent
+                    : "";
+              return activeTab === "document" ? (
+                selectedEditorContent ? (
+                  <Editor initialContent={selectedEditorContent} />
+                ) : editorEnabled ? (
+                  <Editor initialContent="" />
+                ) : (
+                  <div className="h-full flex flex-col items-center justify-center p-8 text-center text-gray-400">
+                    <FileText size={64} strokeWidth={1} className="mb-4 opacity-20" />
+                    <p className="text-lg font-medium">No extraction results yet</p>
+                    <p className="text-sm mt-1 mb-4">Upload and extract a file to see the block editor in action</p>
+                    <button
+                      onClick={handleEnableEditor}
+                      className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition-all text-sm font-semibold shadow-md"
+                    >
+                      Use Editor Without File
+                    </button>
+                  </div>
+                )
               ) : (
-                <div className="h-full flex flex-col items-center justify-center p-8 text-center text-gray-400">
-                  <FileText size={64} strokeWidth={1} className="mb-4 opacity-20" />
-                  <p className="text-lg font-medium">No extraction results yet</p>
-                  <p className="text-sm mt-1 mb-4">Upload and extract a file to see the block editor in action</p>
-                  <button
-                    onClick={handleEnableEditor}
-                    className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 transition-all text-sm font-semibold shadow-md"
-                  >
-                    Use Editor Without File
-                  </button>
+                <div className="h-full bg-slate-950 overflow-auto p-6">
+                  <pre className="text-xs leading-6 text-emerald-300 font-mono whitespace-pre-wrap break-words">
+                    {jsonResult ? JSON.stringify(jsonResult, null, 2) : "// No JSON data available"}
+                  </pre>
                 </div>
-              )
-            ) : (
-              <div className="h-full bg-slate-950 overflow-auto p-6">
-                <pre className="text-xs leading-6 text-emerald-300 font-mono whitespace-pre-wrap break-words">
-                  {jsonResult ? JSON.stringify(jsonResult, null, 2) : "// No JSON data available"}
-                </pre>
-              </div>
-            )}
+              );
+            })()}
               </div>
             </>
           ) : (

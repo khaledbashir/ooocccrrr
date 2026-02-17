@@ -74,7 +74,7 @@ export function useFileProcessor() {
   }, []);
 
   const extractContent = useCallback(async (ocrProvider: OcrProvider) => {
-    if (!state.file) return;
+    if (!state.file) return null;
 
     const isImage = isImageFile(state.file.type);
 
@@ -83,7 +83,7 @@ export function useFileProcessor() {
         ...prev,
         error: ERROR_MESSAGES.PDF_ONLY_FOR_IMAGES,
       }));
-      return;
+      return null;
     }
 
     setState(prev => ({ ...prev, isExtracting: true, error: null }));
@@ -111,12 +111,14 @@ export function useFileProcessor() {
       if (!data || typeof data !== 'object' || !('data' in data)) {
         throw new Error('Invalid API response format');
       }
+      const extractedText = extractDisplayContent(data.data);
       setState(prev => ({
         ...prev,
         jsonResult: data.data,
-        extractedContent: extractDisplayContent(data.data),
+        extractedContent: extractedText,
         isExtracting: false,
       }));
+      return extractedText;
     } catch (error: unknown) {
       const errorMessage =
         error instanceof Error ? error.message : ERROR_MESSAGES.UPSTREAM_REQUEST_FAILED;
@@ -126,6 +128,7 @@ export function useFileProcessor() {
         error: normalizeErrorMessage(errorMessage),
         isExtracting: false,
       }));
+      return null;
     }
   }, [state.file]);
 
