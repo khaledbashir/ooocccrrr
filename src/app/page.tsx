@@ -27,7 +27,7 @@ import "@mantine/core/styles.css";
 
 import { OcrProvider, API_BASE_URLS } from "@/lib/constants";
 import { extractDisplayContent } from "@/lib/utils";
-import { RelevanceLabel, scoreRfpChunk, splitIntoChunks, toChunkTitle } from "@/lib/rfpFilter";
+import { extractRfpMeta, RelevanceLabel, scoreRfpChunk, splitIntoChunks, toChunkTitle } from "@/lib/rfpFilter";
 import { useFileProcessor } from "@/hooks/useFileProcessor";
 import { usePdfExport } from "@/hooks/usePdfExport";
 import { HistoryItem } from "@/types";
@@ -46,6 +46,8 @@ type RelevanceChunk = {
   categoryHits: string[];
   riskHits: string[];
   matchedKeywords: string[];
+  boosterHits: string[];
+  drawingCandidate: boolean;
 };
 
 type RelevanceSummary = {
@@ -56,8 +58,14 @@ type RelevanceSummary = {
   maybe: number;
   irrelevant: number;
   riskFlagged: number;
+  drawingCandidates: number;
   chunks: RelevanceChunk[];
   relevantContent: string;
+  meta: {
+    clientName: string | null;
+    venueName: string | null;
+    projectTitle: string | null;
+  };
 };
 
 type EditorSourceMode = "full" | "relevant" | "blank";
@@ -80,8 +88,14 @@ export default function Home() {
     maybe: 0,
     irrelevant: 0,
     riskFlagged: 0,
+    drawingCandidates: 0,
     chunks: [],
     relevantContent: "",
+    meta: {
+      clientName: null,
+      venueName: null,
+      projectTitle: null,
+    },
   });
   
   const {
@@ -187,8 +201,14 @@ export default function Home() {
         maybe: 0,
         irrelevant: 0,
         riskFlagged: 0,
+        drawingCandidates: 0,
         chunks: [],
         relevantContent: "",
+        meta: {
+          clientName: null,
+          venueName: null,
+          projectTitle: null,
+        },
       });
     }
   };
@@ -206,8 +226,14 @@ export default function Home() {
       maybe: 0,
       irrelevant: 0,
       riskFlagged: 0,
+      drawingCandidates: 0,
       chunks: [],
       relevantContent: "",
+      meta: {
+        clientName: null,
+        venueName: null,
+        projectTitle: null,
+      },
     });
   };
 
@@ -217,6 +243,7 @@ export default function Home() {
   };
 
   const runRelevanceAnalysis = useCallback(async (rawText: string) => {
+    const meta = extractRfpMeta(rawText);
     const parts = splitIntoChunks(rawText);
     if (parts.length === 0) {
       setRelevanceSummary({
@@ -227,8 +254,10 @@ export default function Home() {
         maybe: 0,
         irrelevant: 0,
         riskFlagged: 0,
+        drawingCandidates: 0,
         chunks: [],
         relevantContent: "",
+        meta,
       });
       return;
     }
@@ -242,8 +271,10 @@ export default function Home() {
       maybe: 0,
       irrelevant: 0,
       riskFlagged: 0,
+      drawingCandidates: 0,
       chunks: [],
       relevantContent: "",
+      meta,
     });
 
     const chunks: RelevanceChunk[] = [];
@@ -251,6 +282,7 @@ export default function Home() {
     let maybe = 0;
     let irrelevant = 0;
     let riskFlagged = 0;
+    let drawingCandidates = 0;
 
     for (let i = 0; i < parts.length; i += 1) {
       const chunkText = parts[i];
@@ -259,6 +291,7 @@ export default function Home() {
       if (scored.label === "maybe") maybe += 1;
       if (scored.label === "irrelevant") irrelevant += 1;
       if (scored.riskHits.length > 0) riskFlagged += 1;
+      if (scored.drawingCandidate) drawingCandidates += 1;
 
       chunks.push({
         id: `chunk-${i}`,
@@ -270,6 +303,8 @@ export default function Home() {
         categoryHits: scored.categoryHits,
         riskHits: scored.riskHits,
         matchedKeywords: scored.matchedKeywords,
+        boosterHits: scored.boosterHits,
+        drawingCandidate: scored.drawingCandidate,
       });
 
       const processed = i + 1;
@@ -282,6 +317,7 @@ export default function Home() {
           maybe,
           irrelevant,
           riskFlagged,
+          drawingCandidates,
           chunks: [...chunks],
         }));
         await new Promise((resolve) => setTimeout(resolve, 0));
@@ -301,8 +337,10 @@ export default function Home() {
       maybe,
       irrelevant,
       riskFlagged,
+      drawingCandidates,
       chunks,
       relevantContent,
+      meta,
     });
     setIsAnalyzingRelevance(false);
   }, []);
@@ -523,7 +561,7 @@ export default function Home() {
                         style={{ width: `${relevanceSummary.progress}%` }}
                       />
                     </div>
-                    <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                    <div className="mt-3 grid grid-cols-2 md:grid-cols-5 gap-2 text-xs">
                       <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-2 text-emerald-800">
                         <div className="flex items-center gap-1">
                           <CheckCircle2 size={13} />
@@ -552,7 +590,21 @@ export default function Home() {
                         </div>
                         <p className="mt-1 text-base font-bold">{relevanceSummary.riskFlagged}</p>
                       </div>
+                      <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-2 text-indigo-800">
+                        <div className="flex items-center gap-1">
+                          <Filter size={13} />
+                          Drawings
+                        </div>
+                        <p className="mt-1 text-base font-bold">{relevanceSummary.drawingCandidates}</p>
+                      </div>
                     </div>
+                    {(relevanceSummary.meta.projectTitle || relevanceSummary.meta.clientName || relevanceSummary.meta.venueName) && (
+                      <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700">
+                        {relevanceSummary.meta.projectTitle ? <p className="truncate"><span className="font-semibold">Project:</span> {relevanceSummary.meta.projectTitle}</p> : null}
+                        {relevanceSummary.meta.clientName ? <p className="truncate"><span className="font-semibold">Client:</span> {relevanceSummary.meta.clientName}</p> : null}
+                        {relevanceSummary.meta.venueName ? <p className="truncate"><span className="font-semibold">Venue:</span> {relevanceSummary.meta.venueName}</p> : null}
+                      </div>
+                    )}
                     <div className="mt-3 flex flex-wrap gap-2">
                       <button
                         type="button"
@@ -597,6 +649,7 @@ export default function Home() {
                                 {chunk.reason}
                                 {chunk.categoryHits.length > 0 ? ` • ${chunk.categoryHits.join(", ")}` : ""}
                                 {chunk.riskHits.length > 0 ? ` • risk: ${chunk.riskHits.join(", ")}` : ""}
+                                {chunk.matchedKeywords.length > 0 ? ` • kw: ${chunk.matchedKeywords.slice(0, 2).join(", ")}` : ""}
                               </p>
                             </div>
                           ))}
