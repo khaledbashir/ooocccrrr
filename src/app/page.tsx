@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   FileText,
   Upload,
@@ -31,7 +31,12 @@ import * as XLSX from "xlsx";
 import { OcrProvider, API_BASE_URLS } from "@/lib/constants";
 import { extractDisplayContent } from "@/lib/utils";
 import { extractRfpMeta, RelevanceLabel, scoreRfpChunk, splitIntoChunks, toChunkTitle } from "@/lib/rfpFilter";
-import { buildStructuredWorkbook, StructuredWorkbook } from "@/lib/rfpWorkbook";
+import {
+  buildStructuredWorkbook,
+  parseStructuredWorkbookFromSheets,
+  structuredWorkbookToMarkdown,
+  StructuredWorkbook,
+} from "@/lib/rfpWorkbook";
 import { useFileProcessor } from "@/hooks/useFileProcessor";
 import { usePdfExport } from "@/hooks/usePdfExport";
 import { HistoryItem } from "@/types";
@@ -72,10 +77,11 @@ type RelevanceSummary = {
   };
 };
 
-type EditorSourceMode = "full" | "relevant" | "blank";
+type EditorSourceMode = "full" | "relevant" | "workbook" | "blank";
 type WorkbookSheetPreview = { name: string; html: string; rowCount: number };
 
 export default function Home() {
+  const workbookImportInputRef = useRef<HTMLInputElement>(null);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [activeTab, setActiveTab] = useState<"document" | "json">("document");
   const [isNavOpen, setIsNavOpen] = useState(true);
@@ -86,6 +92,7 @@ export default function Home() {
   const [ocrProvider, setOcrProvider] = useState<OcrProvider>("kreuzberg");
   const [editorEnabled, setEditorEnabled] = useState(false);
   const [editorSourceMode, setEditorSourceMode] = useState<EditorSourceMode>("full");
+  const [workbookEditorContent, setWorkbookEditorContent] = useState("");
   const [isAnalyzingRelevance, setIsAnalyzingRelevance] = useState(false);
   const [isGeneratingWorkbook, setIsGeneratingWorkbook] = useState(false);
   const [structuredWorkbook, setStructuredWorkbook] = useState<StructuredWorkbook | null>(null);
@@ -232,6 +239,7 @@ export default function Home() {
     setEditorEnabled(false);
     setEditorSourceMode("blank");
     setStructuredWorkbook(null);
+    setWorkbookEditorContent("");
     setWorkbookSheets([]);
     setActiveWorkbookSheet("");
     setRelevanceSummary({
@@ -337,6 +345,7 @@ export default function Home() {
       const model = buildStructuredWorkbook(relevanceSummary.chunks, relevanceSummary.meta);
       const { previews } = buildWorkbookArtifacts(model);
       setStructuredWorkbook(model);
+      setWorkbookEditorContent(structuredWorkbookToMarkdown(model));
       setWorkbookSheets(previews);
       if (previews.length > 0) {
         setActiveWorkbookSheet(previews[0].name);
@@ -366,6 +375,35 @@ export default function Home() {
     link.click();
     link.remove();
     URL.revokeObjectURL(url);
+  };
+
+  const importWorkbookXlsx = async (uploadedFile: File) => {
+    const buffer = await uploadedFile.arrayBuffer();
+    const workbook = XLSX.read(buffer, { type: "array" });
+    const sheetRows: Record<string, Record<string, unknown>[]> = {};
+
+    for (const sheetName of workbook.SheetNames) {
+      const sheet = workbook.Sheets[sheetName];
+      sheetRows[sheetName] = XLSX.utils.sheet_to_json(sheet, {
+        defval: "",
+      }) as Record<string, unknown>[];
+    }
+
+    const parsed = parseStructuredWorkbookFromSheets(sheetRows);
+    if (!parsed) {
+      throw new Error("Could not parse structured workbook sheets.");
+    }
+
+    const { previews } = buildWorkbookArtifacts(parsed);
+    const markdown = structuredWorkbookToMarkdown(parsed);
+    setStructuredWorkbook(parsed);
+    setWorkbookSheets(previews);
+    setActiveWorkbookSheet(previews[0]?.name || "");
+    setWorkbookEditorContent(markdown);
+    setEditorSourceMode("workbook");
+    setEditorEnabled(true);
+    setIsEditorOpen(true);
+    setActiveTab("document");
   };
 
   const runRelevanceAnalysis = useCallback(async (rawText: string) => {
@@ -778,10 +816,31 @@ export default function Home() {
                       </div>
                     )}
                     <div className="mt-3 flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        onClick={() => void generateStructuredWorkbook()}
-                        disabled={isAnalyzingRelevance || relevanceSummary.chunks.length === 0 || isGeneratingWorkbook}
+                    <button
+                      type="button"
+                      onClick={() => workbookImportInputRef.current?.click()}
+                      className="rounded-lg border border-cyan-200 bg-cyan-50 text-cyan-700 px-3 py-2 text-xs font-semibold hover:bg-cyan-100"
+                    >
+                      Import XLSX
+                    </button>
+                    <input
+                      ref={workbookImportInputRef}
+                      type="file"
+                      accept=".xlsx"
+                      className="hidden"
+                      onChange={(e) => {
+                        const uploadedFile = e.target.files?.[0];
+                        if (!uploadedFile) return;
+                        void importWorkbookXlsx(uploadedFile).catch((importError: unknown) => {
+                          console.error("Workbook import failed", importError);
+                        });
+                        e.currentTarget.value = "";
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => void generateStructuredWorkbook()}
+                      disabled={isAnalyzingRelevance || relevanceSummary.chunks.length === 0 || isGeneratingWorkbook}
                         className="rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 px-3 py-2 text-xs font-semibold hover:bg-emerald-100 disabled:opacity-50"
                       >
                         {isGeneratingWorkbook ? "Generating Workbook..." : "Generate Workbook"}
@@ -947,6 +1006,8 @@ export default function Home() {
               const selectedEditorContent =
                 editorSourceMode === "relevant"
                   ? relevanceSummary.relevantContent
+                  : editorSourceMode === "workbook"
+                    ? workbookEditorContent
                   : editorSourceMode === "full"
                     ? extractedContent
                     : "";

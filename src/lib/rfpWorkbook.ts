@@ -64,6 +64,8 @@ export type StructuredWorkbook = {
   sources: Array<{ id: string; title: string; score: number; label: string }>;
 };
 
+export type WorkbookSheetRow = Record<string, unknown>;
+
 function cleanText(input: string): string {
   return input.replace(/\s+/g, " ").trim();
 }
@@ -197,4 +199,156 @@ export function buildStructuredWorkbook(
       label: chunk.label,
     })),
   };
+}
+
+function asString(value: unknown, fallback = ""): string {
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "number") return String(value);
+  return fallback;
+}
+
+function rowsToMap(rows: WorkbookSheetRow[], keyField: string, valueField: string) {
+  const map = new Map<string, string>();
+  for (const row of rows) {
+    const key = asString(row[keyField]);
+    const value = asString(row[valueField]);
+    if (key) map.set(key, value);
+  }
+  return map;
+}
+
+export function parseStructuredWorkbookFromSheets(
+  sheets: Record<string, WorkbookSheetRow[]>,
+): StructuredWorkbook | null {
+  const projectRows = sheets.Project || [];
+  const projectMap = rowsToMap(projectRows, "Field", "Value");
+  const projectTitle = projectMap.get("Project Title") || "Imported RFP Project";
+  const clientName = projectMap.get("Client") || "Unknown Client";
+  const venueName = projectMap.get("Venue") || "Unknown Venue";
+  const generatedAt = projectMap.get("Generated At") || new Date().toISOString();
+
+  const requirements = (sheets.Requirements || []).map((row, index) => ({
+    id: asString(row.ID, `REQ-${index + 1}`),
+    text: asString(row.Requirement),
+    category: asString(row.Category, "General"),
+    priority: (asString(row.Priority, "Medium") === "High" ? "High" : "Medium") as "High" | "Medium",
+    source: asString(row.Source),
+  })).filter((row) => row.text);
+
+  const pricing = (sheets.Pricing || []).map((row, index) => ({
+    id: asString(row.ID, `PRC-${index + 1}`),
+    item: asString(row.Item),
+    amount: asString(row.Amount),
+    source: asString(row.Source),
+  })).filter((row) => row.item);
+
+  const schedule = (sheets.Schedule || []).map((row, index) => ({
+    id: asString(row.ID, `SCH-${index + 1}`),
+    milestone: asString(row.Milestone),
+    dueText: asString(row.Due, "TBD"),
+    source: asString(row.Source),
+  })).filter((row) => row.milestone);
+
+  const risks = (sheets.Risks || []).map((row, index) => ({
+    id: asString(row.ID, `RSK-${index + 1}`),
+    risk: asString(row.Risk),
+    severity: (asString(row.Severity, "Medium") === "High" ? "High" : "Medium") as "High" | "Medium",
+    source: asString(row.Source),
+  })).filter((row) => row.risk);
+
+  const assumptions = (sheets.Assumptions || []).map((row, index) => ({
+    id: asString(row.ID, `ASM-${index + 1}`),
+    text: asString(row.Assumption),
+    source: asString(row.Source),
+  })).filter((row) => row.text);
+
+  const sources = (sheets.Sources || []).map((row) => ({
+    id: asString(row["Chunk ID"]),
+    title: asString(row.Title),
+    score: Number(asString(row.Score, "0")) || 0,
+    label: asString(row.Label, "maybe"),
+  })).filter((row) => row.id || row.title);
+
+  if (
+    requirements.length === 0 &&
+    pricing.length === 0 &&
+    schedule.length === 0 &&
+    risks.length === 0 &&
+    assumptions.length === 0
+  ) {
+    return null;
+  }
+
+  return {
+    project: { projectTitle, clientName, venueName, generatedAt },
+    requirements,
+    pricing,
+    schedule,
+    risks,
+    assumptions,
+    sources,
+  };
+}
+
+export function structuredWorkbookToMarkdown(model: StructuredWorkbook): string {
+  const sections: string[] = [];
+
+  sections.push(
+    `# ${model.project.projectTitle}\n\n` +
+      `- Client: ${model.project.clientName}\n` +
+      `- Venue: ${model.project.venueName}\n` +
+      `- Generated: ${model.project.generatedAt}`,
+  );
+
+  if (model.requirements.length > 0) {
+    sections.push(
+      "## Requirements\n\n" +
+        model.requirements
+          .slice(0, 80)
+          .map((item) => `- [${item.priority}] ${item.text} (${item.category})`)
+          .join("\n"),
+    );
+  }
+
+  if (model.pricing.length > 0) {
+    sections.push(
+      "## Pricing\n\n| Item | Amount |\n|---|---|\n" +
+        model.pricing
+          .slice(0, 80)
+          .map((item) => `| ${item.item.replace(/\|/g, "\\|")} | ${item.amount} |`)
+          .join("\n"),
+    );
+  }
+
+  if (model.schedule.length > 0) {
+    sections.push(
+      "## Schedule\n\n" +
+        model.schedule
+          .slice(0, 80)
+          .map((item) => `- ${item.milestone} (Due: ${item.dueText})`)
+          .join("\n"),
+    );
+  }
+
+  if (model.risks.length > 0) {
+    sections.push(
+      "## Risks\n\n" +
+        model.risks
+          .slice(0, 80)
+          .map((item) => `- [${item.severity}] ${item.risk}`)
+          .join("\n"),
+    );
+  }
+
+  if (model.assumptions.length > 0) {
+    sections.push(
+      "## Assumptions\n\n" +
+        model.assumptions
+          .slice(0, 80)
+          .map((item) => `- ${item.text}`)
+          .join("\n"),
+    );
+  }
+
+  return sections.join("\n\n");
 }
