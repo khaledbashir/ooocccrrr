@@ -79,6 +79,89 @@ type RelevanceSummary = {
 
 type EditorSourceMode = "full" | "relevant" | "workbook" | "blank";
 type WorkbookSheetPreview = { name: string; html: string; rowCount: number };
+type DiffBucket = {
+  added: string[];
+  edited: string[];
+  removed: string[];
+};
+
+type WorkbookDiffSummary = {
+  requirements: DiffBucket;
+  pricing: DiffBucket;
+  schedule: DiffBucket;
+  risks: DiffBucket;
+  assumptions: DiffBucket;
+};
+
+function buildDiffBucket<T extends { id: string }>(
+  previous: T[],
+  next: T[],
+  getLabel: (item: T) => string,
+  isSameContent: (a: T, b: T) => boolean,
+): DiffBucket {
+  const prevById = new Map(previous.map((item) => [item.id, item]));
+  const nextById = new Map(next.map((item) => [item.id, item]));
+
+  const added: string[] = [];
+  const edited: string[] = [];
+  const removed: string[] = [];
+
+  for (const [id, nextItem] of nextById) {
+    const prevItem = prevById.get(id);
+    if (!prevItem) {
+      added.push(getLabel(nextItem));
+      continue;
+    }
+    if (!isSameContent(prevItem, nextItem)) {
+      edited.push(getLabel(nextItem));
+    }
+  }
+
+  for (const [id, prevItem] of prevById) {
+    if (!nextById.has(id)) {
+      removed.push(getLabel(prevItem));
+    }
+  }
+
+  return { added, edited, removed };
+}
+
+function diffStructuredWorkbooks(previous: StructuredWorkbook | null, next: StructuredWorkbook): WorkbookDiffSummary | null {
+  if (!previous) return null;
+
+  return {
+    requirements: buildDiffBucket(
+      previous.requirements,
+      next.requirements,
+      (item) => `${item.id}: ${item.text}`,
+      (a, b) => a.text === b.text && a.category === b.category && a.priority === b.priority && a.citation === b.citation,
+    ),
+    pricing: buildDiffBucket(
+      previous.pricing,
+      next.pricing,
+      (item) => `${item.id}: ${item.item} (${item.amount})`,
+      (a, b) => a.item === b.item && a.amount === b.amount && a.citation === b.citation,
+    ),
+    schedule: buildDiffBucket(
+      previous.schedule,
+      next.schedule,
+      (item) => `${item.id}: ${item.milestone} (${item.dueText})`,
+      (a, b) => a.milestone === b.milestone && a.dueText === b.dueText && a.citation === b.citation,
+    ),
+    risks: buildDiffBucket(
+      previous.risks,
+      next.risks,
+      (item) => `${item.id}: ${item.risk}`,
+      (a, b) => a.risk === b.risk && a.severity === b.severity && a.citation === b.citation,
+    ),
+    assumptions: buildDiffBucket(
+      previous.assumptions,
+      next.assumptions,
+      (item) => `${item.id}: ${item.text}`,
+      (a, b) => a.text === b.text && a.citation === b.citation,
+    ),
+  };
+}
 
 export default function Home() {
   const workbookImportInputRef = useRef<HTMLInputElement>(null);
@@ -96,6 +179,7 @@ export default function Home() {
   const [isAnalyzingRelevance, setIsAnalyzingRelevance] = useState(false);
   const [isGeneratingWorkbook, setIsGeneratingWorkbook] = useState(false);
   const [structuredWorkbook, setStructuredWorkbook] = useState<StructuredWorkbook | null>(null);
+  const [workbookDiff, setWorkbookDiff] = useState<WorkbookDiffSummary | null>(null);
   const [workbookSheets, setWorkbookSheets] = useState<WorkbookSheetPreview[]>([]);
   const [activeWorkbookSheet, setActiveWorkbookSheet] = useState<string>("");
   const [relevanceSummary, setRelevanceSummary] = useState<RelevanceSummary>({
@@ -239,6 +323,7 @@ export default function Home() {
     setEditorEnabled(false);
     setEditorSourceMode("blank");
     setStructuredWorkbook(null);
+    setWorkbookDiff(null);
     setWorkbookEditorContent("");
     setWorkbookSheets([]);
     setActiveWorkbookSheet("");
@@ -289,38 +374,38 @@ export default function Home() {
 
     appendSheet(
       "Requirements",
-      ["ID", "Requirement", "Category", "Priority", "Source"],
-      model.requirements.map((item) => [item.id, item.text, item.category, item.priority, item.source]),
+      ["ID", "Requirement", "Category", "Priority", "Source", "Citation"],
+      model.requirements.map((item) => [item.id, item.text, item.category, item.priority, item.source, item.citation]),
     );
 
     appendSheet(
       "Pricing",
-      ["ID", "Item", "Amount", "Source"],
-      model.pricing.map((item) => [item.id, item.item, item.amount, item.source]),
+      ["ID", "Item", "Amount", "Source", "Citation"],
+      model.pricing.map((item) => [item.id, item.item, item.amount, item.source, item.citation]),
     );
 
     appendSheet(
       "Schedule",
-      ["ID", "Milestone", "Due", "Source"],
-      model.schedule.map((item) => [item.id, item.milestone, item.dueText, item.source]),
+      ["ID", "Milestone", "Due", "Source", "Citation"],
+      model.schedule.map((item) => [item.id, item.milestone, item.dueText, item.source, item.citation]),
     );
 
     appendSheet(
       "Risks",
-      ["ID", "Risk", "Severity", "Source"],
-      model.risks.map((item) => [item.id, item.risk, item.severity, item.source]),
+      ["ID", "Risk", "Severity", "Source", "Citation"],
+      model.risks.map((item) => [item.id, item.risk, item.severity, item.source, item.citation]),
     );
 
     appendSheet(
       "Assumptions",
-      ["ID", "Assumption", "Source"],
-      model.assumptions.map((item) => [item.id, item.text, item.source]),
+      ["ID", "Assumption", "Source", "Citation"],
+      model.assumptions.map((item) => [item.id, item.text, item.source, item.citation]),
     );
 
     appendSheet(
       "Sources",
-      ["Chunk ID", "Title", "Score", "Label"],
-      model.sources.map((source) => [source.id, source.title, source.score, source.label]),
+      ["Chunk ID", "Title", "Score", "Label", "Citation"],
+      model.sources.map((source) => [source.id, source.title, source.score, source.label, source.id]),
     );
 
     const previews: WorkbookSheetPreview[] = workbook.SheetNames.map((name) => {
@@ -345,6 +430,7 @@ export default function Home() {
       const model = buildStructuredWorkbook(relevanceSummary.chunks, relevanceSummary.meta);
       const { previews } = buildWorkbookArtifacts(model);
       setStructuredWorkbook(model);
+      setWorkbookDiff(null);
       setWorkbookEditorContent(structuredWorkbookToMarkdown(model));
       setWorkbookSheets(previews);
       if (previews.length > 0) {
@@ -360,6 +446,7 @@ export default function Home() {
     if (!structuredWorkbook) {
       const { previews } = buildWorkbookArtifacts(model);
       setStructuredWorkbook(model);
+      setWorkbookDiff(null);
       setWorkbookSheets(previews);
       if (previews.length > 0) setActiveWorkbookSheet(previews[0].name);
     }
@@ -394,9 +481,11 @@ export default function Home() {
       throw new Error("Could not parse structured workbook sheets.");
     }
 
+    const diff = diffStructuredWorkbooks(structuredWorkbook, parsed);
     const { previews } = buildWorkbookArtifacts(parsed);
     const markdown = structuredWorkbookToMarkdown(parsed);
     setStructuredWorkbook(parsed);
+    setWorkbookDiff(diff);
     setWorkbookSheets(previews);
     setActiveWorkbookSheet(previews[0]?.name || "");
     setWorkbookEditorContent(markdown);
@@ -408,6 +497,7 @@ export default function Home() {
 
   const runRelevanceAnalysis = useCallback(async (rawText: string) => {
     setStructuredWorkbook(null);
+    setWorkbookDiff(null);
     setWorkbookSheets([]);
     setActiveWorkbookSheet("");
     const meta = extractRfpMeta(rawText);
@@ -929,6 +1019,30 @@ export default function Home() {
                                 workbookSheets[0].html,
                             }}
                           />
+                        </div>
+                      </div>
+                    ) : null}
+                    {workbookDiff ? (
+                      <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3">
+                        <p className="text-xs font-semibold text-amber-900">Workbook Import Diff</p>
+                        <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2 text-xs text-amber-900">
+                          {(
+                            [
+                              ["Requirements", workbookDiff.requirements],
+                              ["Pricing", workbookDiff.pricing],
+                              ["Schedule", workbookDiff.schedule],
+                              ["Risks", workbookDiff.risks],
+                              ["Assumptions", workbookDiff.assumptions],
+                            ] as const
+                          ).map(([label, diff]) => (
+                            <div key={label} className="rounded-md border border-amber-200 bg-white/70 px-2 py-1.5">
+                              <p className="font-semibold">{label}</p>
+                              <p>Added: {diff.added.length} | Edited: {diff.edited.length} | Removed: {diff.removed.length}</p>
+                              {diff.added.length > 0 ? <p className="truncate">+ {diff.added[0]}</p> : null}
+                              {diff.edited.length > 0 ? <p className="truncate">~ {diff.edited[0]}</p> : null}
+                              {diff.removed.length > 0 ? <p className="truncate">- {diff.removed[0]}</p> : null}
+                            </div>
+                          ))}
                         </div>
                       </div>
                     ) : null}

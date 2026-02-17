@@ -20,6 +20,7 @@ export type WorkbookRequirement = {
   category: string;
   priority: "High" | "Medium";
   source: string;
+  citation: string;
 };
 
 export type WorkbookPricing = {
@@ -27,6 +28,7 @@ export type WorkbookPricing = {
   item: string;
   amount: string;
   source: string;
+  citation: string;
 };
 
 export type WorkbookSchedule = {
@@ -34,6 +36,7 @@ export type WorkbookSchedule = {
   milestone: string;
   dueText: string;
   source: string;
+  citation: string;
 };
 
 export type WorkbookRisk = {
@@ -41,12 +44,14 @@ export type WorkbookRisk = {
   risk: string;
   severity: "High" | "Medium";
   source: string;
+  citation: string;
 };
 
 export type WorkbookAssumption = {
   id: string;
   text: string;
   source: string;
+  citation: string;
 };
 
 export type StructuredWorkbook = {
@@ -83,7 +88,7 @@ function selectCategory(hits: string[]): string {
 }
 
 function toSourceLabel(chunk: WorkbookChunkInput): string {
-  return `${chunk.title} (${chunk.id})`;
+  return chunk.title;
 }
 
 const REQUIREMENT_PATTERN = /\b(must|required|shall|submittal|compliance|deliverable|specification)\b/i;
@@ -126,6 +131,7 @@ export function buildStructuredWorkbook(
   for (const chunk of selected) {
     const lines = splitLines(chunk.text);
     const source = toSourceLabel(chunk);
+    const citation = chunk.id;
 
     for (const line of lines) {
       if (REQUIREMENT_PATTERN.test(line)) {
@@ -135,6 +141,7 @@ export function buildStructuredWorkbook(
           category: selectCategory(chunk.categoryHits),
           priority: /\b(must|required|shall)\b/i.test(line) ? "High" : "Medium",
           source,
+          citation,
         });
       }
 
@@ -146,6 +153,7 @@ export function buildStructuredWorkbook(
             item: line.slice(0, 120),
             amount,
             source,
+            citation,
           });
         }
       }
@@ -157,6 +165,7 @@ export function buildStructuredWorkbook(
           milestone: line.slice(0, 120),
           dueText: dateMatch ? dateMatch[0] : "TBD",
           source,
+          citation,
         });
       }
 
@@ -166,6 +175,7 @@ export function buildStructuredWorkbook(
           risk: line.slice(0, 140),
           severity: /\b(liquidated damages|termination|indemnif|penalty)\b/i.test(line) ? "High" : "Medium",
           source,
+          citation,
         });
       }
 
@@ -174,6 +184,7 @@ export function buildStructuredWorkbook(
           id: `ASM-${assIndex++}`,
           text: line.slice(0, 140),
           source,
+          citation,
         });
       }
     }
@@ -207,6 +218,11 @@ function asString(value: unknown, fallback = ""): string {
   return fallback;
 }
 
+function inferCitationFromSource(source: string): string {
+  const match = source.match(/\((chunk-\d+)\)/i);
+  return match?.[1] || "";
+}
+
 function rowsToMap(rows: WorkbookSheetRow[], keyField: string, valueField: string) {
   const map = new Map<string, string>();
   for (const row of rows) {
@@ -233,6 +249,7 @@ export function parseStructuredWorkbookFromSheets(
     category: asString(row.Category, "General"),
     priority: (asString(row.Priority, "Medium") === "High" ? "High" : "Medium") as "High" | "Medium",
     source: asString(row.Source),
+    citation: asString(row.Citation) || inferCitationFromSource(asString(row.Source)),
   })).filter((row) => row.text);
 
   const pricing = (sheets.Pricing || []).map((row, index) => ({
@@ -240,6 +257,7 @@ export function parseStructuredWorkbookFromSheets(
     item: asString(row.Item),
     amount: asString(row.Amount),
     source: asString(row.Source),
+    citation: asString(row.Citation) || inferCitationFromSource(asString(row.Source)),
   })).filter((row) => row.item);
 
   const schedule = (sheets.Schedule || []).map((row, index) => ({
@@ -247,6 +265,7 @@ export function parseStructuredWorkbookFromSheets(
     milestone: asString(row.Milestone),
     dueText: asString(row.Due, "TBD"),
     source: asString(row.Source),
+    citation: asString(row.Citation) || inferCitationFromSource(asString(row.Source)),
   })).filter((row) => row.milestone);
 
   const risks = (sheets.Risks || []).map((row, index) => ({
@@ -254,12 +273,14 @@ export function parseStructuredWorkbookFromSheets(
     risk: asString(row.Risk),
     severity: (asString(row.Severity, "Medium") === "High" ? "High" : "Medium") as "High" | "Medium",
     source: asString(row.Source),
+    citation: asString(row.Citation) || inferCitationFromSource(asString(row.Source)),
   })).filter((row) => row.risk);
 
   const assumptions = (sheets.Assumptions || []).map((row, index) => ({
     id: asString(row.ID, `ASM-${index + 1}`),
     text: asString(row.Assumption),
     source: asString(row.Source),
+    citation: asString(row.Citation) || inferCitationFromSource(asString(row.Source)),
   })).filter((row) => row.text);
 
   const sources = (sheets.Sources || []).map((row) => ({
@@ -305,7 +326,7 @@ export function structuredWorkbookToMarkdown(model: StructuredWorkbook): string 
       "## Requirements\n\n" +
         model.requirements
           .slice(0, 80)
-          .map((item) => `- [${item.priority}] ${item.text} (${item.category})`)
+          .map((item) => `- [${item.priority}] ${item.text} (${item.category}) [${item.citation || item.source}]`)
           .join("\n"),
     );
   }
@@ -325,7 +346,7 @@ export function structuredWorkbookToMarkdown(model: StructuredWorkbook): string 
       "## Schedule\n\n" +
         model.schedule
           .slice(0, 80)
-          .map((item) => `- ${item.milestone} (Due: ${item.dueText})`)
+          .map((item) => `- ${item.milestone} (Due: ${item.dueText}) [${item.citation || item.source}]`)
           .join("\n"),
     );
   }
@@ -335,7 +356,7 @@ export function structuredWorkbookToMarkdown(model: StructuredWorkbook): string 
       "## Risks\n\n" +
         model.risks
           .slice(0, 80)
-          .map((item) => `- [${item.severity}] ${item.risk}`)
+          .map((item) => `- [${item.severity}] ${item.risk} [${item.citation || item.source}]`)
           .join("\n"),
     );
   }
@@ -345,7 +366,7 @@ export function structuredWorkbookToMarkdown(model: StructuredWorkbook): string 
       "## Assumptions\n\n" +
         model.assumptions
           .slice(0, 80)
-          .map((item) => `- ${item.text}`)
+          .map((item) => `- ${item.text} [${item.citation || item.source}]`)
           .join("\n"),
     );
   }
