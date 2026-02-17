@@ -18,6 +18,7 @@ import {
   Check,
   Bot,
   UserCircle2,
+  Globe,
 } from "lucide-react";
 import { EditorProps } from "@/types";
 
@@ -97,6 +98,8 @@ export default function Editor({ initialContent, onChange }: EditorProps) {
   const [isChatSidebarOpen, setIsChatSidebarOpen] = useState(false);
   const [mode, setMode] = useState<EditorMode>("edit");
   const [chatInput, setChatInput] = useState("");
+  const [chatWebSearchEnabled, setChatWebSearchEnabled] = useState(false);
+  const [chatWebSearchQuery, setChatWebSearchQuery] = useState("");
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>(initialChatMessages);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
 
@@ -230,6 +233,7 @@ export default function Editor({ initialContent, onChange }: EditorProps) {
 
     const blocks = editor.document as unknown as EditorBlock[];
     const currentPlainText = blocksToPlainText(blocks);
+    const chatSearchQuery = chatWebSearchEnabled ? (chatWebSearchQuery.trim() || prompt) : undefined;
 
     try {
       const response = await fetch("/api/ai", {
@@ -254,7 +258,7 @@ export default function Editor({ initialContent, onChange }: EditorProps) {
               .join("\n"),
             `User message: ${prompt}`,
           ].join("\n"),
-          webSearchQuery: webSearchQuery.trim() || undefined,
+          webSearchQuery: chatSearchQuery,
         }),
       });
 
@@ -599,6 +603,28 @@ export default function Editor({ initialContent, onChange }: EditorProps) {
                   {prompt}
                 </button>
               ))}
+            </div>
+            <div className="rounded-lg border border-slate-200 bg-slate-50/80 p-2 space-y-2">
+              <button
+                type="button"
+                onClick={() => setChatWebSearchEnabled((enabled) => !enabled)}
+                className={`inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-semibold ${
+                  chatWebSearchEnabled
+                    ? "bg-emerald-100 text-emerald-800 border border-emerald-200"
+                    : "bg-white text-slate-600 border border-slate-200"
+                }`}
+              >
+                <Globe size={12} />
+                {chatWebSearchEnabled ? "Web Search On" : "Web Search Off"}
+              </button>
+              {chatWebSearchEnabled ? (
+                <input
+                  value={chatWebSearchQuery}
+                  onChange={(e) => setChatWebSearchQuery(e.target.value)}
+                  placeholder="Optional search query (uses your chat prompt if empty)"
+                  className="w-full h-8 rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-700"
+                />
+              ) : null}
             </div>
             <textarea
               value={chatInput}
