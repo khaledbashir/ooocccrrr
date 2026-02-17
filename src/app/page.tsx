@@ -26,10 +26,12 @@ import axios from "axios";
 import dynamic from "next/dynamic";
 import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
+import * as XLSX from "xlsx";
 
 import { OcrProvider, API_BASE_URLS } from "@/lib/constants";
 import { extractDisplayContent } from "@/lib/utils";
 import { extractRfpMeta, RelevanceLabel, scoreRfpChunk, splitIntoChunks, toChunkTitle } from "@/lib/rfpFilter";
+import { buildStructuredWorkbook, StructuredWorkbook } from "@/lib/rfpWorkbook";
 import { useFileProcessor } from "@/hooks/useFileProcessor";
 import { usePdfExport } from "@/hooks/usePdfExport";
 import { HistoryItem } from "@/types";
@@ -71,6 +73,7 @@ type RelevanceSummary = {
 };
 
 type EditorSourceMode = "full" | "relevant" | "blank";
+type WorkbookSheetPreview = { name: string; html: string; rowCount: number };
 
 export default function Home() {
   const [history, setHistory] = useState<HistoryItem[]>([]);
@@ -84,6 +87,10 @@ export default function Home() {
   const [editorEnabled, setEditorEnabled] = useState(false);
   const [editorSourceMode, setEditorSourceMode] = useState<EditorSourceMode>("full");
   const [isAnalyzingRelevance, setIsAnalyzingRelevance] = useState(false);
+  const [isGeneratingWorkbook, setIsGeneratingWorkbook] = useState(false);
+  const [structuredWorkbook, setStructuredWorkbook] = useState<StructuredWorkbook | null>(null);
+  const [workbookSheets, setWorkbookSheets] = useState<WorkbookSheetPreview[]>([]);
+  const [activeWorkbookSheet, setActiveWorkbookSheet] = useState<string>("");
   const [relevanceSummary, setRelevanceSummary] = useState<RelevanceSummary>({
     total: 0,
     processed: 0,
@@ -224,6 +231,9 @@ export default function Home() {
     clearError();
     setEditorEnabled(false);
     setEditorSourceMode("blank");
+    setStructuredWorkbook(null);
+    setWorkbookSheets([]);
+    setActiveWorkbookSheet("");
     setRelevanceSummary({
       total: 0,
       processed: 0,
@@ -249,7 +259,119 @@ export default function Home() {
     setEditorSourceMode("blank");
   };
 
+  const buildWorkbookArtifacts = (model: StructuredWorkbook) => {
+    const workbook = XLSX.utils.book_new();
+
+    const appendSheet = (name: string, headers: string[], rows: Array<Array<string | number>>) => {
+      const sheet = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+      XLSX.utils.book_append_sheet(workbook, sheet, name);
+    };
+
+    appendSheet("Project", ["Field", "Value"], [
+      ["Project Title", model.project.projectTitle],
+      ["Client", model.project.clientName],
+      ["Venue", model.project.venueName],
+      ["Generated At", model.project.generatedAt],
+      ["Requirements", model.requirements.length],
+      ["Pricing Lines", model.pricing.length],
+      ["Schedule Items", model.schedule.length],
+      ["Risks", model.risks.length],
+      ["Assumptions", model.assumptions.length],
+    ]);
+
+    appendSheet(
+      "Requirements",
+      ["ID", "Requirement", "Category", "Priority", "Source"],
+      model.requirements.map((item) => [item.id, item.text, item.category, item.priority, item.source]),
+    );
+
+    appendSheet(
+      "Pricing",
+      ["ID", "Item", "Amount", "Source"],
+      model.pricing.map((item) => [item.id, item.item, item.amount, item.source]),
+    );
+
+    appendSheet(
+      "Schedule",
+      ["ID", "Milestone", "Due", "Source"],
+      model.schedule.map((item) => [item.id, item.milestone, item.dueText, item.source]),
+    );
+
+    appendSheet(
+      "Risks",
+      ["ID", "Risk", "Severity", "Source"],
+      model.risks.map((item) => [item.id, item.risk, item.severity, item.source]),
+    );
+
+    appendSheet(
+      "Assumptions",
+      ["ID", "Assumption", "Source"],
+      model.assumptions.map((item) => [item.id, item.text, item.source]),
+    );
+
+    appendSheet(
+      "Sources",
+      ["Chunk ID", "Title", "Score", "Label"],
+      model.sources.map((source) => [source.id, source.title, source.score, source.label]),
+    );
+
+    const previews: WorkbookSheetPreview[] = workbook.SheetNames.map((name) => {
+      const sheet = workbook.Sheets[name];
+      const range = sheet["!ref"] ? XLSX.utils.decode_range(sheet["!ref"]) : null;
+      const rowCount = range ? range.e.r : 0;
+      return {
+        name,
+        html: XLSX.utils.sheet_to_html(sheet),
+        rowCount,
+      };
+    });
+
+    return { workbook, previews };
+  };
+
+  const generateStructuredWorkbook = async () => {
+    if (isGeneratingWorkbook || relevanceSummary.chunks.length === 0) return;
+
+    setIsGeneratingWorkbook(true);
+    try {
+      const model = buildStructuredWorkbook(relevanceSummary.chunks, relevanceSummary.meta);
+      const { previews } = buildWorkbookArtifacts(model);
+      setStructuredWorkbook(model);
+      setWorkbookSheets(previews);
+      if (previews.length > 0) {
+        setActiveWorkbookSheet(previews[0].name);
+      }
+    } finally {
+      setIsGeneratingWorkbook(false);
+    }
+  };
+
+  const exportWorkbookXlsx = async () => {
+    const model = structuredWorkbook || buildStructuredWorkbook(relevanceSummary.chunks, relevanceSummary.meta);
+    if (!structuredWorkbook) {
+      const { previews } = buildWorkbookArtifacts(model);
+      setStructuredWorkbook(model);
+      setWorkbookSheets(previews);
+      if (previews.length > 0) setActiveWorkbookSheet(previews[0].name);
+    }
+
+    const { workbook } = buildWorkbookArtifacts(model);
+    const xlsxData = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
+    const blob = new Blob([xlsxData], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "rfp-structured-workbook.xlsx";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  };
+
   const runRelevanceAnalysis = useCallback(async (rawText: string) => {
+    setStructuredWorkbook(null);
+    setWorkbookSheets([]);
+    setActiveWorkbookSheet("");
     const meta = extractRfpMeta(rawText);
     const parts = splitIntoChunks(rawText);
     if (parts.length === 0) {
@@ -658,6 +780,22 @@ export default function Home() {
                     <div className="mt-3 flex flex-wrap gap-2">
                       <button
                         type="button"
+                        onClick={() => void generateStructuredWorkbook()}
+                        disabled={isAnalyzingRelevance || relevanceSummary.chunks.length === 0 || isGeneratingWorkbook}
+                        className="rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 px-3 py-2 text-xs font-semibold hover:bg-emerald-100 disabled:opacity-50"
+                      >
+                        {isGeneratingWorkbook ? "Generating Workbook..." : "Generate Workbook"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void exportWorkbookXlsx()}
+                        disabled={relevanceSummary.chunks.length === 0}
+                        className="rounded-lg border border-slate-200 bg-white text-slate-700 px-3 py-2 text-xs font-semibold hover:bg-slate-50 disabled:opacity-50"
+                      >
+                        Export XLSX
+                      </button>
+                      <button
+                        type="button"
                         onClick={() => {
                           if (!relevanceSummary.relevantContent) return;
                           setEditorSourceMode("relevant");
@@ -705,6 +843,36 @@ export default function Home() {
                           ))}
                       </div>
                     )}
+                    {workbookSheets.length > 0 ? (
+                      <div className="mt-3 rounded-xl border border-slate-200 bg-white overflow-hidden">
+                        <div className="h-10 border-b border-slate-200 px-2 flex items-center gap-2 overflow-x-auto bg-slate-50">
+                          {workbookSheets.map((sheet) => (
+                            <button
+                              key={sheet.name}
+                              type="button"
+                              onClick={() => setActiveWorkbookSheet(sheet.name)}
+                              className={`shrink-0 px-2 py-1 rounded-md text-xs font-semibold ${
+                                activeWorkbookSheet === sheet.name
+                                  ? "bg-white text-indigo-700 border border-indigo-200"
+                                  : "text-slate-600 hover:bg-white"
+                              }`}
+                            >
+                              {sheet.name}
+                            </button>
+                          ))}
+                        </div>
+                        <div className="max-h-64 overflow-auto bg-white p-3">
+                          <div
+                            className="prose prose-sm max-w-none"
+                            dangerouslySetInnerHTML={{
+                              __html:
+                                workbookSheets.find((sheet) => sheet.name === activeWorkbookSheet)?.html ||
+                                workbookSheets[0].html,
+                            }}
+                          />
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
                 )}
               </div>
