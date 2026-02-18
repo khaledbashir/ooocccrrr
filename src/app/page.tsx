@@ -377,6 +377,7 @@ export default function Home() {
         setActiveWorkbookSheet("");
         setRelevanceSummary(buildEmptyRelevanceSummary());
       }
+      runAncEstimateFromText(extractedText);
     }
     fetchHistory();
   };
@@ -407,6 +408,9 @@ export default function Home() {
         if (extractedText && extractionMode === "rfp_workflow" && i === batchFiles.length - 1) {
           await runRelevanceAnalysis(extractedText);
         }
+        if (extractedText && i === batchFiles.length - 1) {
+          runAncEstimateFromText(extractedText);
+        }
 
         setBatchProgress({ current: i + 1, total: batchFiles.length });
       }
@@ -421,14 +425,16 @@ export default function Home() {
     setHistoryItem(item);
     setEditorSourceMode("full");
     setEditorEnabled(true);
-    if (extractionMode !== "rfp_workflow") {
-      setRelevanceSummary(buildEmptyRelevanceSummary());
-      return;
-    }
     try {
       const parsed = JSON.parse(item.content);
       const text = extractDisplayContent(parsed);
+      runAncEstimateFromText(text);
+      if (extractionMode !== "rfp_workflow") {
+        setRelevanceSummary(buildEmptyRelevanceSummary());
+        return;
+      }
       void runRelevanceAnalysis(text);
+      return;
     } catch {
       setRelevanceSummary(buildEmptyRelevanceSummary());
     }
@@ -568,6 +574,18 @@ export default function Home() {
     link.click();
     link.remove();
     URL.revokeObjectURL(url);
+  };
+
+  const runAncEstimateFromText = (sourceText: string) => {
+    const trimmedText = sourceText.trim();
+    if (!trimmedText) return;
+    const result = runAncEstimator({
+      rawText: trimmedText,
+      projectTitle: relevanceSummary.meta.projectTitle || file?.name || "ANC Estimate",
+      clientName: relevanceSummary.meta.clientName || undefined,
+      venueName: relevanceSummary.meta.venueName || undefined,
+    });
+    setAncEstimate(result);
   };
 
   const runAncEstimate = async () => {
