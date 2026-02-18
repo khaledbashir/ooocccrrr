@@ -6,6 +6,7 @@ import {
   Upload,
   Download,
   FolderUp,
+  Calculator,
   History,
   Loader2,
   Image as ImageIcon,
@@ -38,6 +39,8 @@ import {
   structuredWorkbookToMarkdown,
   StructuredWorkbook,
 } from "@/lib/rfpWorkbook";
+import { AncEstimateResult, ancEstimateToReportText, runAncEstimator } from "@/lib/estimatorEngine";
+import { buildEstimatorWorkbook } from "@/lib/estimatorWorkbook";
 import { ExcelExtractionScope, ExtractionMode, useFileProcessor } from "@/hooks/useFileProcessor";
 import { usePdfExport } from "@/hooks/usePdfExport";
 import { HistoryItem } from "@/types";
@@ -207,7 +210,10 @@ export default function Home() {
   const [workbookEditorContent, setWorkbookEditorContent] = useState("");
   const [isAnalyzingRelevance, setIsAnalyzingRelevance] = useState(false);
   const [isGeneratingWorkbook, setIsGeneratingWorkbook] = useState(false);
+  const [isRunningEstimate, setIsRunningEstimate] = useState(false);
+  const [isExportingEstimatePdf, setIsExportingEstimatePdf] = useState(false);
   const [structuredWorkbook, setStructuredWorkbook] = useState<StructuredWorkbook | null>(null);
+  const [ancEstimate, setAncEstimate] = useState<AncEstimateResult | null>(null);
   const [workbookDiff, setWorkbookDiff] = useState<WorkbookDiffSummary | null>(null);
   const [workbookSheets, setWorkbookSheets] = useState<WorkbookSheetPreview[]>([]);
   const [activeWorkbookSheet, setActiveWorkbookSheet] = useState<string>("");
@@ -233,7 +239,7 @@ export default function Home() {
 
   const workflowSteps =
     extractionMode === "rfp_workflow"
-      ? (["Receive RFP", "Extract Text", "Filter Relevance", "Build Workbook", "Edit + Export"] as const)
+      ? (["Receive RFP", "Extract Text", "Filter Relevance", "Build Workbook", "Estimate + Export"] as const)
       : (["Receive File", "Extract All Tabs", "Edit + Export"] as const);
 
   const workflowIndex = (() => {
@@ -245,7 +251,7 @@ export default function Home() {
     if (!file) return 0;
     if (!extractedContent) return 1;
     if (relevanceSummary.total === 0) return 2;
-    if (!structuredWorkbook) return 3;
+    if (!structuredWorkbook && !ancEstimate) return 3;
     return 4;
   })();
 
@@ -358,6 +364,7 @@ export default function Home() {
       scope: excelExtractionScope,
       selectedSheetName: activeExcelSheetData?.name,
     }, targetFile);
+    setAncEstimate(null);
     if (extractedText) {
       setEditorSourceMode("full");
       setEditorEnabled(true);
@@ -376,6 +383,7 @@ export default function Home() {
 
   const handleExtractAll = async () => {
     if (batchFiles.length === 0 || isBatchExtracting) return;
+    setAncEstimate(null);
     setIsBatchExtracting(true);
     setBatchProgress({ current: 0, total: batchFiles.length });
     setIsPreviewVisible(previewMode === "auto");
@@ -409,6 +417,7 @@ export default function Home() {
   };
 
   const handleSelectHistoryItem = (item: HistoryItem) => {
+    setAncEstimate(null);
     setHistoryItem(item);
     setEditorSourceMode("full");
     setEditorEnabled(true);
@@ -432,6 +441,7 @@ export default function Home() {
     setActiveBatchIndex(0);
     setIsBatchExtracting(false);
     setBatchProgress({ current: 0, total: 0 });
+    setAncEstimate(null);
     setEditorEnabled(false);
     setEditorSourceMode("blank");
     setStructuredWorkbook(null);
@@ -558,6 +568,77 @@ export default function Home() {
     link.click();
     link.remove();
     URL.revokeObjectURL(url);
+  };
+
+  const runAncEstimate = async () => {
+    const sourceText =
+      extractionMode === "rfp_workflow" && relevanceSummary.relevantContent
+        ? relevanceSummary.relevantContent
+        : extractedContent;
+    if (!sourceText) return;
+
+    setIsRunningEstimate(true);
+    try {
+      const result = runAncEstimator({
+        rawText: sourceText,
+        projectTitle: relevanceSummary.meta.projectTitle || file?.name || "ANC Estimate",
+        clientName: relevanceSummary.meta.clientName || undefined,
+        venueName: relevanceSummary.meta.venueName || undefined,
+      });
+      setAncEstimate(result);
+    } finally {
+      setIsRunningEstimate(false);
+    }
+  };
+
+  const exportAncEstimateXlsx = async () => {
+    if (!ancEstimate) return;
+    const workbook = buildEstimatorWorkbook(ancEstimate);
+    const xlsxData = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
+    const blob = new Blob([xlsxData], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "anc-estimate-workbook.xlsx";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const exportAncEstimatePdf = async () => {
+    if (!ancEstimate) return;
+    setIsExportingEstimatePdf(true);
+    try {
+      const reportText = ancEstimateToReportText(ancEstimate);
+      const response = await fetch("/api/export/pdf", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: `ANC Estimate - ${ancEstimate.project.projectTitle}`,
+          filename: "anc-estimate.pdf",
+          content: reportText,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to export estimate PDF.");
+      }
+
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "anc-estimate.pdf";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (pdfError) {
+      console.error("Estimate PDF export failed", pdfError);
+    } finally {
+      setIsExportingEstimatePdf(false);
+    }
   };
 
   const importWorkbookXlsx = async (uploadedFile: File) => {
@@ -1017,6 +1098,7 @@ export default function Home() {
                         setActiveBatchIndex(0);
                         setIsBatchExtracting(false);
                         setBatchProgress({ current: 0, total: 0 });
+                        setAncEstimate(null);
                       }}
                       className="text-xs text-red-500 hover:underline"
                     >
@@ -1296,6 +1378,70 @@ export default function Home() {
                     ) : null}
                   </div>
                 )}
+                {extractedContent ? (
+                  <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2">
+                        <Calculator size={16} className="text-indigo-600" />
+                        <p className="text-sm font-semibold text-slate-900">ANC Senior Estimator Engine</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => void runAncEstimate()}
+                          disabled={isRunningEstimate}
+                          className="rounded-lg bg-indigo-600 text-white px-3 py-2 text-xs font-semibold hover:bg-indigo-700 disabled:opacity-50"
+                        >
+                          {isRunningEstimate ? "Running..." : "Run Estimate"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void exportAncEstimateXlsx()}
+                          disabled={!ancEstimate}
+                          className="rounded-lg border border-slate-200 bg-white text-slate-700 px-3 py-2 text-xs font-semibold hover:bg-slate-50 disabled:opacity-50"
+                        >
+                          Export XLSX
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void exportAncEstimatePdf()}
+                          disabled={!ancEstimate || isExportingEstimatePdf}
+                          className="rounded-lg border border-slate-200 bg-white text-slate-700 px-3 py-2 text-xs font-semibold hover:bg-slate-50 disabled:opacity-50"
+                        >
+                          {isExportingEstimatePdf ? "Exporting PDF..." : "Export PDF"}
+                        </button>
+                      </div>
+                    </div>
+                    {ancEstimate ? (
+                      <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                        <div className="rounded-lg border border-slate-200 bg-slate-50 p-2">
+                          <p className="text-slate-500">Profile</p>
+                          <p className="mt-1 font-semibold text-slate-800">{ancEstimate.display.label}</p>
+                        </div>
+                        <div className="rounded-lg border border-slate-200 bg-slate-50 p-2">
+                          <p className="text-slate-500">Total SqFt</p>
+                          <p className="mt-1 font-semibold text-slate-800">{ancEstimate.display.totalSqFt}</p>
+                        </div>
+                        <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-2 text-emerald-900">
+                          <p>Total Cost</p>
+                          <p className="mt-1 font-bold">
+                            ${ancEstimate.totals.totalCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </p>
+                        </div>
+                        <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-2 text-indigo-900">
+                          <p>Selling Price</p>
+                          <p className="mt-1 font-bold">
+                            ${ancEstimate.totals.sellingPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </p>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="mt-3 text-xs text-slate-500">
+                        Run the estimator after extraction to generate deterministic budget math, then export PDF and multi-tab XLSX.
+                      </p>
+                    )}
+                  </div>
+                ) : null}
               </div>
             )}
 
