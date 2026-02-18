@@ -67,17 +67,18 @@ export function buildEstimatorWorkbook(result: AncEstimateResult) {
   XLSX.utils.book_append_sheet(workbook, summarySheet, "Summary Dashboard");
 
   const takeoffRows: Array<Array<string | number>> = [
-    ["Scope", "Value", "Notes"],
-    ["Display Profile", result.display.label, "Pre-fill protocol output"],
-    ["Product", result.display.product, "Can be overridden by estimator"],
-    ["Quantity", result.display.quantity, ""],
-    ["Total SqFt", result.display.totalSqFt, "Derived from OCR/drawing text"],
-    ["Vendor Rate / SqFt", result.display.vendorRatePerSqFt, "Dealer net from rate card"],
-    ["Structural Rate / SqFt", result.display.structuralRatePerSqFt, "Wall/Ceiling logic"],
+    ["Display", "Location", "Qty", "SqFt", "Profile", "Product"],
+    ...result.displayBreakdown.map((item) => [
+      item.name,
+      item.location,
+      item.quantity,
+      item.sqFt,
+      item.profile,
+      item.product,
+    ]),
   ];
   const takeoffSheet = sheetFromAoa(takeoffRows);
-  setSheetLayout(takeoffSheet, [28, 20, 45]);
-  setColumnNumberFormat(takeoffSheet, 1, CURRENCY_FORMAT, 5);
+  setSheetLayout(takeoffSheet, [34, 20, 8, 10, 18, 32]);
   XLSX.utils.book_append_sheet(workbook, takeoffSheet, "Display Takeoff");
 
   const costRows: Array<Array<string | number>> = [
@@ -126,13 +127,13 @@ export function buildEstimatorWorkbook(result: AncEstimateResult) {
 
   const bidByDisplayRows: Array<Array<string | number>> = [
     ["Display / Scope", "Cost", "Selling Price", "Margin $", "Margin %"],
-    [
-      `${result.display.label} (${result.display.totalSqFt} SqFt)`,
-      result.totals.totalCost,
-      result.totals.sellingPrice,
-      result.totals.grossMarginDollars,
-      result.totals.grossMarginPercent / 100,
-    ],
+    ...result.displayBreakdown.map((item) => [
+      `${item.name} (${item.sqFt} SqFt)`,
+      item.totalCost,
+      item.sellingPrice,
+      item.marginDollars,
+      item.marginPercent / 100,
+    ]),
     ["Tax", 0, result.totals.taxAmount, result.totals.taxAmount, 0],
     ["Bond", 0, result.totals.bondAmount, result.totals.bondAmount, 0],
     ["Bid Form Subtotal", result.totals.totalCost, result.totals.bidFormSubtotal, result.totals.bidFormSubtotal - result.totals.totalCost, (result.totals.bidFormSubtotal - result.totals.totalCost) / Math.max(result.totals.bidFormSubtotal, 1)],

@@ -1,4 +1,5 @@
 import { ANC_BUDGET_RATES, ANC_BUNDLE_RATES, ANC_VENDOR_RATES } from "@/lib/rateTables";
+import type { StructuredDisplay } from "@/lib/displayExtractor";
 
 type PrefillProfile = "outdoor_marquee" | "center_hung" | "lobby_atrium" | "indoor_standard";
 
@@ -20,6 +21,7 @@ export type AncEstimateInput = {
   taxRateOverride?: number | null;
   bondRateOverride?: number | null;
   alternates?: AncAlternateInput[];
+  displayList?: StructuredDisplay[];
 };
 
 export type AncAlternateInput = {
@@ -53,6 +55,19 @@ export type AncEstimateResult = {
     structuralRatePerSqFt: number;
   };
   alternates: AncAlternateInput[];
+  displayBreakdown: Array<{
+    id: string;
+    name: string;
+    location: string;
+    quantity: number;
+    sqFt: number;
+    profile: PrefillProfile;
+    product: string;
+    totalCost: number;
+    sellingPrice: number;
+    marginDollars: number;
+    marginPercent: number;
+  }>;
   lineItems: AncEstimateLineItem[];
   totals: {
     totalCost: number;
@@ -166,24 +181,93 @@ function money(value: number): number {
 
 export function runAncEstimator(input: AncEstimateInput): AncEstimateResult {
   const rawText = input.rawText || "";
-  const classification = classifyDisplay(rawText);
-  const quantity = parseQuantity(rawText);
-  const sqftPerDisplay = parseSqFtFromText(rawText);
-  const totalSqFt = sqftPerDisplay * quantity;
+  const displayInputs =
+    input.displayList && input.displayList.length > 0
+      ? input.displayList
+      : [
+          {
+            id: "display-1",
+            name: "Inferred Display",
+            location: "Unspecified",
+            widthFt: 1,
+            heightFt: 1,
+            sqFt: parseSqFtFromText(rawText),
+            pitchMm: null,
+            quantity: parseQuantity(rawText),
+            isOutdoor: normalizeText(rawText).includes("outdoor"),
+          } as StructuredDisplay,
+        ];
 
+  let hardware = 0;
+  let installLabor = 0;
+  let electrical = 0;
+  let structural = 0;
+  let sendingCard = 0;
+  let spareParts = 0;
+  let signalCableKit = 0;
+  let upsBackup = 0;
+  let backupProcessor = 0;
+  let weatherproof = 0;
+  let totalSqFt = 0;
+  let quantity = 0;
+  let baseClassification: DisplayClassification | null = null;
+
+  const displayBreakdown: AncEstimateResult["displayBreakdown"] = [];
+
+  for (const display of displayInputs) {
+    const qty = Number.isFinite(display.quantity) && display.quantity > 0 ? display.quantity : 1;
+    const sqftEach = Number.isFinite(display.sqFt) && display.sqFt > 0 ? display.sqFt : parseSqFtFromText(display.name);
+    const sqftTotal = sqftEach * qty;
+    const classification = classifyDisplay(`${display.name} ${display.location} ${display.isOutdoor ? "outdoor" : "indoor"} ${rawText}`);
+    if (!baseClassification) baseClassification = classification;
+    quantity += qty;
+    totalSqFt += sqftTotal;
+
+    const vendorRate = classification.vendorRatePerSqFt;
+    const ledHardwareCostPerSqFt = vendorRate * ANC_BUDGET_RATES.dutyMultiplier * ANC_BUDGET_RATES.sparesMultiplier;
+    const dHardware = ledHardwareCostPerSqFt * sqftTotal;
+    const dInstall = ANC_BUDGET_RATES.installLaborPerSqFt * sqftTotal;
+    const dElectrical = ANC_BUDGET_RATES.electricalPerSqFt * sqftTotal;
+    const dStructural = classification.structuralRatePerSqFt * sqftTotal;
+    const dSending = ANC_BUNDLE_RATES.sendingCardPerDisplay * qty;
+    const dSpare = dHardware * ANC_BUNDLE_RATES.sparePartsRate;
+    const dCable = ANC_BUNDLE_RATES.signalCableKitPer25SqFt * (sqftTotal / 25);
+    const dUps = classification.isScoreboardOrCenterHung ? ANC_BUNDLE_RATES.upsBatteryBackup : 0;
+    const dProcessor = sqftTotal > 300 ? ANC_BUNDLE_RATES.backupVideoProcessor : 0;
+    const dWeather = classification.isOutdoor ? ANC_BUNDLE_RATES.outdoorWeatherproofPerSqFt * sqftTotal : 0;
+    const dCost = dHardware + dInstall + dElectrical + dStructural + dSending + dSpare + dCable + dUps + dProcessor + dWeather;
+    const dSell = dCost / (1 - ANC_BUDGET_RATES.marginTarget);
+    const dMargin = dSell - dCost;
+
+    hardware += dHardware;
+    installLabor += dInstall;
+    electrical += dElectrical;
+    structural += dStructural;
+    sendingCard += dSending;
+    spareParts += dSpare;
+    signalCableKit += dCable;
+    upsBackup += dUps;
+    backupProcessor += dProcessor;
+    weatherproof += dWeather;
+
+    displayBreakdown.push({
+      id: display.id,
+      name: display.name,
+      location: display.location || "Unspecified",
+      quantity: qty,
+      sqFt: money(sqftTotal),
+      profile: classification.profile,
+      product: classification.product,
+      totalCost: money(dCost),
+      sellingPrice: money(dSell),
+      marginDollars: money(dMargin),
+      marginPercent: money((dMargin / dSell) * 100),
+    });
+  }
+
+  const classification = baseClassification || classifyDisplay(rawText);
+  if (quantity <= 0) quantity = parseQuantity(rawText);
   const vendorRate = classification.vendorRatePerSqFt;
-  const ledHardwareCostPerSqFt = vendorRate * ANC_BUDGET_RATES.dutyMultiplier * ANC_BUDGET_RATES.sparesMultiplier;
-  const hardware = ledHardwareCostPerSqFt * totalSqFt;
-  const installLabor = ANC_BUDGET_RATES.installLaborPerSqFt * totalSqFt;
-  const electrical = ANC_BUDGET_RATES.electricalPerSqFt * totalSqFt;
-  const structural = classification.structuralRatePerSqFt * totalSqFt;
-
-  const sendingCard = ANC_BUNDLE_RATES.sendingCardPerDisplay * quantity;
-  const spareParts = hardware * ANC_BUNDLE_RATES.sparePartsRate;
-  const signalCableKit = ANC_BUNDLE_RATES.signalCableKitPer25SqFt * (totalSqFt / 25);
-  const upsBackup = classification.isScoreboardOrCenterHung ? ANC_BUNDLE_RATES.upsBatteryBackup : 0;
-  const backupProcessor = totalSqFt > 300 ? ANC_BUNDLE_RATES.backupVideoProcessor : 0;
-  const weatherproof = classification.isOutdoor ? ANC_BUNDLE_RATES.outdoorWeatherproofPerSqFt * totalSqFt : 0;
 
   const projectManagement = ANC_BUDGET_RATES.projectManagementFlat;
   const stampedDrawings = ANC_BUDGET_RATES.engineeringStampedDrawingsFlat;
@@ -379,6 +463,7 @@ export function runAncEstimator(input: AncEstimateInput): AncEstimateResult {
       structuralRatePerSqFt: classification.structuralRatePerSqFt,
     },
     alternates,
+    displayBreakdown,
     lineItems,
     totals: {
       totalCost: money(totalCost),

@@ -40,6 +40,7 @@ import {
   StructuredWorkbook,
 } from "@/lib/rfpWorkbook";
 import { AncAlternateInput, AncEstimateResult, ancEstimateToReportText, runAncEstimator } from "@/lib/estimatorEngine";
+import { StructuredDisplay, extractStructuredDisplays } from "@/lib/displayExtractor";
 import { buildEstimatorWorkbook } from "@/lib/estimatorWorkbook";
 import { ExcelExtractionScope, ExtractionMode, useFileProcessor } from "@/hooks/useFileProcessor";
 import { usePdfExport } from "@/hooks/usePdfExport";
@@ -217,6 +218,7 @@ export default function Home() {
   const [alternateLabelInput, setAlternateLabelInput] = useState("");
   const [alternateAmountInput, setAlternateAmountInput] = useState("");
   const [alternates, setAlternates] = useState<AncAlternateInput[]>([]);
+  const [structuredDisplays, setStructuredDisplays] = useState<StructuredDisplay[]>([]);
   const [structuredWorkbook, setStructuredWorkbook] = useState<StructuredWorkbook | null>(null);
   const [ancEstimate, setAncEstimate] = useState<AncEstimateResult | null>(null);
   const [workbookDiff, setWorkbookDiff] = useState<WorkbookDiffSummary | null>(null);
@@ -357,6 +359,7 @@ export default function Home() {
   const handleUpload = async () => {
     const targetFile = batchFiles[activeBatchIndex] || file;
     if (!targetFile) return;
+    setStructuredDisplays([]);
     
     // Show warning if using Marker or Docling
     if (ocrProvider === 'marker' || ocrProvider === 'docling') {
@@ -427,6 +430,7 @@ export default function Home() {
 
   const handleSelectHistoryItem = (item: HistoryItem) => {
     setAncEstimate(null);
+    setStructuredDisplays([]);
     setHistoryItem(item);
     setEditorSourceMode("full");
     setEditorEnabled(true);
@@ -441,6 +445,7 @@ export default function Home() {
       void runRelevanceAnalysis(text);
       return;
     } catch {
+      setStructuredDisplays([]);
       setRelevanceSummary(buildEmptyRelevanceSummary());
     }
   };
@@ -465,6 +470,7 @@ export default function Home() {
     setWorkbookEditorContent("");
     setWorkbookSheets([]);
     setActiveWorkbookSheet("");
+    setStructuredDisplays([]);
     setRelevanceSummary(buildEmptyRelevanceSummary());
     setIsPreviewVisible(true);
   };
@@ -589,6 +595,8 @@ export default function Home() {
   const runAncEstimateFromText = (sourceText: string) => {
     const trimmedText = sourceText.trim();
     if (!trimmedText) return;
+    const parsedDisplays = extractStructuredDisplays(trimmedText);
+    setStructuredDisplays(parsedDisplays);
     const parsedTaxRate = Number(taxRateOverrideInput);
     const parsedBondRate = Number(bondRateOverrideInput);
     const taxRateOverride = Number.isFinite(parsedTaxRate) && parsedTaxRate >= 0 ? parsedTaxRate / 100 : null;
@@ -601,6 +609,7 @@ export default function Home() {
       taxRateOverride,
       bondRateOverride,
       alternates,
+      displayList: parsedDisplays,
     });
     setAncEstimate(result);
   };
@@ -614,6 +623,8 @@ export default function Home() {
 
     setIsRunningEstimate(true);
     try {
+      const parsedDisplays = extractStructuredDisplays(sourceText);
+      setStructuredDisplays(parsedDisplays);
       const parsedTaxRate = Number(taxRateOverrideInput);
       const parsedBondRate = Number(bondRateOverrideInput);
       const taxRateOverride = Number.isFinite(parsedTaxRate) && parsedTaxRate >= 0 ? parsedTaxRate / 100 : null;
@@ -626,6 +637,7 @@ export default function Home() {
         taxRateOverride,
         bondRateOverride,
         alternates,
+        displayList: parsedDisplays,
       });
       setAncEstimate(result);
     } finally {
@@ -1154,6 +1166,7 @@ export default function Home() {
                         setIsBatchExtracting(false);
                         setBatchProgress({ current: 0, total: 0 });
                         setAncEstimate(null);
+                        setStructuredDisplays([]);
                       }}
                       className="text-xs text-red-500 hover:underline"
                     >
@@ -1539,6 +1552,42 @@ export default function Home() {
                         ))}
                       </div>
                     ) : null}
+                    <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-xs font-semibold text-slate-800">Structured Display List</p>
+                        <p className="text-[11px] text-slate-500">{structuredDisplays.length} parsed</p>
+                      </div>
+                      {structuredDisplays.length > 0 ? (
+                        <div className="mt-2 max-h-32 overflow-auto rounded-md border border-slate-200 bg-white">
+                          <table className="min-w-full text-[11px] text-slate-700">
+                            <thead className="sticky top-0 bg-slate-50 text-slate-600">
+                              <tr>
+                                <th className="px-2 py-1 text-left font-semibold">Display</th>
+                                <th className="px-2 py-1 text-left font-semibold">Location</th>
+                                <th className="px-2 py-1 text-right font-semibold">Qty</th>
+                                <th className="px-2 py-1 text-right font-semibold">SqFt</th>
+                                <th className="px-2 py-1 text-right font-semibold">Pitch</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {structuredDisplays.map((item) => (
+                                <tr key={item.id} className="border-t border-slate-100">
+                                  <td className="px-2 py-1">{item.name}</td>
+                                  <td className="px-2 py-1">{item.location}</td>
+                                  <td className="px-2 py-1 text-right">{item.quantity}</td>
+                                  <td className="px-2 py-1 text-right">{item.sqFt.toFixed(2)}</td>
+                                  <td className="px-2 py-1 text-right">{item.pitchMm ? `${item.pitchMm}mm` : "-"}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      ) : (
+                        <p className="mt-1 text-[11px] text-slate-500">
+                          No structured rows detected yet. Run extraction on content that includes display names and dimensions.
+                        </p>
+                      )}
+                    </div>
                     {ancEstimate ? (
                       <div className="mt-3 grid grid-cols-2 md:grid-cols-6 gap-2 text-xs">
                         <div className="rounded-lg border border-slate-200 bg-slate-50 p-2">
