@@ -4,6 +4,7 @@ import { isExcelFile, isImageFile, isPdfFile, extractDisplayContent } from '@/li
 import { FileProcessingState, HistoryItem } from '@/types';
 
 export type ExtractionMode = 'rfp_workflow' | 'ocr_all';
+export type ExcelExtractionScope = 'all' | 'active';
 
 async function parseJsonSafely(response: Response) {
   const text = await response.text();
@@ -21,13 +22,19 @@ function normalizeErrorMessage(message: string): string {
   return message;
 }
 
-async function parseExcelWorkbook(file: File) {
+type ExcelExtractionOptions = {
+  scope?: ExcelExtractionScope;
+  selectedSheetName?: string;
+};
+
+async function parseExcelWorkbook(file: File, options: ExcelExtractionOptions = {}) {
   const buffer = await file.arrayBuffer();
   const bytes = new Uint8Array(buffer);
   const XLSX = await import('xlsx');
   const workbook = XLSX.read(bytes, { type: 'array' });
+  const scope = options.scope ?? 'all';
 
-  const sheets = workbook.SheetNames.map((sheetName) => {
+  const allSheets = workbook.SheetNames.map((sheetName) => {
     const sheet = workbook.Sheets[sheetName];
     const ref = sheet?.['!ref'];
     const decodedRange = ref ? XLSX.utils.decode_range(ref) : null;
@@ -41,15 +48,23 @@ async function parseExcelWorkbook(file: File) {
     };
   });
 
-  const firstSheetHtml = sheets[0]?.html || null;
-  const markdownSections = sheets.map((sheet) => {
+  const scopedSheets =
+    scope === 'active' && options.selectedSheetName
+      ? allSheets.filter((sheet) => sheet.name === options.selectedSheetName)
+      : allSheets;
+  const extractedSheets = scopedSheets.length > 0 ? scopedSheets : allSheets.slice(0, 1);
+  const defaultPreviewSheet =
+    (options.selectedSheetName && allSheets.find((sheet) => sheet.name === options.selectedSheetName)) || allSheets[0];
+  const firstSheetHtml = defaultPreviewSheet?.html || null;
+
+  const markdownSections = extractedSheets.map((sheet) => {
     const content = sheet.csv || '(empty sheet)';
     return `## Sheet: ${sheet.name}\n\n\`\`\`csv\n${content}\n\`\`\``;
   });
 
   return {
     excelData: firstSheetHtml,
-    excelSheets: sheets.map((sheet) => ({
+    excelSheets: allSheets.map((sheet) => ({
       name: sheet.name,
       html: sheet.html,
       rowCount: sheet.rowCount,
@@ -57,9 +72,10 @@ async function parseExcelWorkbook(file: File) {
     extractedText: `# Workbook: ${file.name}\n\n${markdownSections.join('\n\n')}`,
     jsonResult: {
       provider: 'local_excel_parser',
-      mode: 'all_worksheets',
+      mode: scope === 'active' ? 'single_worksheet' : 'all_worksheets',
+      selectedSheet: scope === 'active' ? options.selectedSheetName || extractedSheets[0]?.name || null : null,
       workbook: file.name,
-      sheets: sheets.map((sheet) => ({
+      sheets: extractedSheets.map((sheet) => ({
         name: sheet.name,
         rowCount: sheet.rowCount,
         csv: sheet.csv,
@@ -136,14 +152,19 @@ export function useFileProcessor() {
     }
   }, []);
 
-  const extractContent = useCallback(async (ocrProvider: OcrProvider, _mode: ExtractionMode = 'rfp_workflow') => {
+  const extractContent = useCallback(
+    async (
+      ocrProvider: OcrProvider,
+      _mode: ExtractionMode = 'rfp_workflow',
+      excelOptions: ExcelExtractionOptions = {},
+    ) => {
     if (!state.file) return null;
     const isExcel = isExcelFile(state.file.name);
 
     if (isExcel) {
       try {
         setState(prev => ({ ...prev, isExtracting: true, error: null }));
-        const excelExtraction = await parseExcelWorkbook(state.file);
+        const excelExtraction = await parseExcelWorkbook(state.file, excelOptions);
         setState(prev => ({
           ...prev,
           excelData: excelExtraction.excelData,

@@ -37,7 +37,7 @@ import {
   structuredWorkbookToMarkdown,
   StructuredWorkbook,
 } from "@/lib/rfpWorkbook";
-import { ExtractionMode, useFileProcessor } from "@/hooks/useFileProcessor";
+import { ExcelExtractionScope, ExtractionMode, useFileProcessor } from "@/hooks/useFileProcessor";
 import { usePdfExport } from "@/hooks/usePdfExport";
 import { HistoryItem } from "@/types";
 
@@ -191,6 +191,7 @@ export default function Home() {
   const [previewMode, setPreviewMode] = useState<"auto" | "on-demand">("auto");
   const [isPreviewVisible, setIsPreviewVisible] = useState(true);
   const [activeExcelSheet, setActiveExcelSheet] = useState("");
+  const [excelExtractionScope, setExcelExtractionScope] = useState<ExcelExtractionScope>("all");
   const [ocrProvider, setOcrProvider] = useState<OcrProvider>("kreuzberg");
   const [extractionMode, setExtractionMode] = useState<ExtractionMode>("rfp_workflow");
   const [editorEnabled, setEditorEnabled] = useState(false);
@@ -242,6 +243,13 @@ export default function Home() {
 
   const activeExcelSheetData =
     excelSheets.find((sheet) => sheet.name === activeExcelSheet) || excelSheets[0] || null;
+  const isPdfSelectedFile = Boolean(file && (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")));
+  const isExcelSelectedFile = Boolean(
+    file &&
+      (file.name.toLowerCase().endsWith(".xlsx") ||
+        file.name.toLowerCase().endsWith(".xls") ||
+        file.name.toLowerCase().endsWith(".csv")),
+  );
   const extractionModeLabel = extractionMode === "rfp_workflow" ? "RFP Workflow" : "OCR All Tabs";
   const providerLabel =
     ocrProvider === "marker"
@@ -303,6 +311,10 @@ export default function Home() {
 
   const handleDownloadPdfImages = async () => {
     if (!file) return;
+    if (!isPdfSelectedFile) {
+      alert("Download Images works for PDF files only.");
+      return;
+    }
     await exportPdfToImages(file);
   };
 
@@ -316,7 +328,10 @@ export default function Home() {
       console.warn(`${serviceName} service may not be running. Expected at: ${serviceUrl}`);
     }
     
-    const extractedText = await extractContent(ocrProvider, extractionMode);
+    const extractedText = await extractContent(ocrProvider, extractionMode, {
+      scope: excelExtractionScope,
+      selectedSheetName: activeExcelSheetData?.name,
+    });
     if (extractedText) {
       setEditorSourceMode("full");
       setEditorEnabled(true);
@@ -740,17 +755,28 @@ export default function Home() {
                     <option value="kreuzberg">Kreuzberg OCR</option>
                     <option value="ollama_glm_ocr">GLM-OCR (Ollama)</option>
                   </select>
-                  {file && (file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) && (
+                  {isExcelSelectedFile ? (
+                    <select
+                      value={excelExtractionScope}
+                      onChange={(e) => setExcelExtractionScope(e.target.value as ExcelExtractionScope)}
+                      className="h-9 rounded-lg border border-slate-200 px-3 text-xs md:text-sm font-medium text-slate-700 bg-white"
+                      title="Excel extraction scope"
+                    >
+                      <option value="all">Extract all worksheets</option>
+                      <option value="active">Extract active worksheet only</option>
+                    </select>
+                  ) : null}
+                  {file ? (
                     <button
                       onClick={handleDownloadPdfImages}
-                      disabled={isExporting}
+                      disabled={isExporting || !isPdfSelectedFile}
                       className="inline-flex items-center gap-2 bg-white text-slate-700 border border-slate-200 px-4 py-2 rounded-lg hover:bg-slate-50 transition-all text-sm font-semibold disabled:opacity-60 disabled:cursor-not-allowed"
-                      title="Download each PDF page as PNG"
+                      title={isPdfSelectedFile ? "Download each PDF page as PNG" : "PDF only"}
                     >
                       {isExporting ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
                       {isExporting ? "Exporting..." : "Download Images"}
                     </button>
-                  )}
+                  ) : null}
                   {file && (previewUrl || excelData) ? (
                     <button
                       onClick={() => setIsPreviewVisible((visible) => !visible)}
@@ -783,12 +809,12 @@ export default function Home() {
                       Clear Error
                     </button>
                   )}
-                  {file && !isExtracting && !extractedContent && !error && (
+                  {file && !isExtracting && !error && (
                     <button
                       onClick={handleUpload}
                       className="h-9 bg-indigo-600 text-white px-4 rounded-lg hover:bg-indigo-700 transition-all text-xs md:text-sm font-semibold shadow-sm"
                     >
-                      Extract Content
+                      {extractedContent ? "Re-Extract" : "Extract Content"}
                     </button>
                   )}
                   <button
