@@ -17,6 +17,14 @@ export type AncEstimateInput = {
   projectTitle?: string | null;
   clientName?: string | null;
   venueName?: string | null;
+  taxRateOverride?: number | null;
+  bondRateOverride?: number | null;
+  alternates?: AncAlternateInput[];
+};
+
+export type AncAlternateInput = {
+  label: string;
+  amount: number;
 };
 
 export type AncEstimateLineItem = {
@@ -44,6 +52,7 @@ export type AncEstimateResult = {
     vendorRatePerSqFt: number;
     structuralRatePerSqFt: number;
   };
+  alternates: AncAlternateInput[];
   lineItems: AncEstimateLineItem[];
   totals: {
     totalCost: number;
@@ -52,6 +61,8 @@ export type AncEstimateResult = {
     taxAmount: number;
     bondRate: number;
     bondAmount: number;
+    alternateAdjustmentTotal: number;
+    adjustedBidFormSubtotal: number;
     bidFormSubtotal: number;
     grossMarginDollars: number;
     grossMarginPercent: number;
@@ -192,11 +203,22 @@ export function runAncEstimator(input: AncEstimateInput): AncEstimateResult {
     stampedDrawings;
 
   const sellingPrice = totalCost / (1 - ANC_BUDGET_RATES.marginTarget);
-  const taxRate = parseRateFromKeyword(rawText, "tax");
-  const bondRate = parseRateFromKeyword(rawText, "bond");
+  const taxRate =
+    typeof input.taxRateOverride === "number" && Number.isFinite(input.taxRateOverride)
+      ? input.taxRateOverride
+      : parseRateFromKeyword(rawText, "tax");
+  const bondRate =
+    typeof input.bondRateOverride === "number" && Number.isFinite(input.bondRateOverride)
+      ? input.bondRateOverride
+      : parseRateFromKeyword(rawText, "bond");
+  const alternates = (input.alternates || [])
+    .map((item) => ({ label: item.label.trim(), amount: money(item.amount) }))
+    .filter((item) => item.label.length > 0 && Number.isFinite(item.amount));
   const taxAmount = sellingPrice * taxRate;
   const bondAmount = sellingPrice * bondRate;
+  const alternateAdjustmentTotal = alternates.reduce((sum, item) => sum + item.amount, 0);
   const bidFormSubtotal = sellingPrice + taxAmount + bondAmount;
+  const adjustedBidFormSubtotal = bidFormSubtotal + alternateAdjustmentTotal;
   const grossMarginDollars = sellingPrice - totalCost;
 
   const assumptions = [
@@ -206,6 +228,8 @@ export function runAncEstimator(input: AncEstimateInput): AncEstimateResult {
     `Area assumption: ${money(totalSqFt)} sq ft total`,
     `Hardware formula: (Vendor * 1.10 duty * 1.03 spares) * SqFt`,
     `Margin target: ${(ANC_BUDGET_RATES.marginTarget * 100).toFixed(0)}%`,
+    `Tax rate: ${(taxRate * 100).toFixed(2)}%`,
+    `Bond rate: ${(bondRate * 100).toFixed(2)}%`,
   ];
 
   const lineItems: AncEstimateLineItem[] = [
@@ -328,6 +352,13 @@ export function runAncEstimator(input: AncEstimateInput): AncEstimateResult {
       formula: `Selling Price + Tax + Bond`,
       amount: money(bidFormSubtotal),
     },
+    {
+      id: "PRICE-BID-ADJ",
+      group: "pricing",
+      label: "Adjusted Bid Subtotal (with Alternates)",
+      formula: `Bid Form Subtotal + Alternate Adjustments`,
+      amount: money(adjustedBidFormSubtotal),
+    },
   ];
 
   return {
@@ -347,6 +378,7 @@ export function runAncEstimator(input: AncEstimateInput): AncEstimateResult {
       vendorRatePerSqFt: vendorRate,
       structuralRatePerSqFt: classification.structuralRatePerSqFt,
     },
+    alternates,
     lineItems,
     totals: {
       totalCost: money(totalCost),
@@ -355,6 +387,8 @@ export function runAncEstimator(input: AncEstimateInput): AncEstimateResult {
       taxAmount: money(taxAmount),
       bondRate: Number(bondRate.toFixed(6)),
       bondAmount: money(bondAmount),
+      alternateAdjustmentTotal: money(alternateAdjustmentTotal),
+      adjustedBidFormSubtotal: money(adjustedBidFormSubtotal),
       bidFormSubtotal: money(bidFormSubtotal),
       grossMarginDollars: money(grossMarginDollars),
       grossMarginPercent: money((grossMarginDollars / sellingPrice) * 100),
@@ -390,6 +424,8 @@ export function ancEstimateToReportText(result: AncEstimateResult): string {
   lines.push(`- Tax (${(result.totals.taxRate * 100).toFixed(2)}%): ${formatMoney(result.totals.taxAmount)}`);
   lines.push(`- Bond (${(result.totals.bondRate * 100).toFixed(2)}%): ${formatMoney(result.totals.bondAmount)}`);
   lines.push(`- Bid Form Subtotal: ${formatMoney(result.totals.bidFormSubtotal)}`);
+  lines.push(`- Alternate Adjustments: ${formatMoney(result.totals.alternateAdjustmentTotal)}`);
+  lines.push(`- Adjusted Bid Subtotal: ${formatMoney(result.totals.adjustedBidFormSubtotal)}`);
   lines.push(`- Gross Margin: ${formatMoney(result.totals.grossMarginDollars)} (${result.totals.grossMarginPercent.toFixed(2)}%)`);
   lines.push("");
   lines.push("Assumptions");

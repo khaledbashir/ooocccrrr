@@ -39,7 +39,7 @@ import {
   structuredWorkbookToMarkdown,
   StructuredWorkbook,
 } from "@/lib/rfpWorkbook";
-import { AncEstimateResult, ancEstimateToReportText, runAncEstimator } from "@/lib/estimatorEngine";
+import { AncAlternateInput, AncEstimateResult, ancEstimateToReportText, runAncEstimator } from "@/lib/estimatorEngine";
 import { buildEstimatorWorkbook } from "@/lib/estimatorWorkbook";
 import { ExcelExtractionScope, ExtractionMode, useFileProcessor } from "@/hooks/useFileProcessor";
 import { usePdfExport } from "@/hooks/usePdfExport";
@@ -212,6 +212,11 @@ export default function Home() {
   const [isGeneratingWorkbook, setIsGeneratingWorkbook] = useState(false);
   const [isRunningEstimate, setIsRunningEstimate] = useState(false);
   const [isExportingEstimatePdf, setIsExportingEstimatePdf] = useState(false);
+  const [taxRateOverrideInput, setTaxRateOverrideInput] = useState("");
+  const [bondRateOverrideInput, setBondRateOverrideInput] = useState("");
+  const [alternateLabelInput, setAlternateLabelInput] = useState("");
+  const [alternateAmountInput, setAlternateAmountInput] = useState("");
+  const [alternates, setAlternates] = useState<AncAlternateInput[]>([]);
   const [structuredWorkbook, setStructuredWorkbook] = useState<StructuredWorkbook | null>(null);
   const [ancEstimate, setAncEstimate] = useState<AncEstimateResult | null>(null);
   const [workbookDiff, setWorkbookDiff] = useState<WorkbookDiffSummary | null>(null);
@@ -447,6 +452,11 @@ export default function Home() {
     setActiveBatchIndex(0);
     setIsBatchExtracting(false);
     setBatchProgress({ current: 0, total: 0 });
+    setTaxRateOverrideInput("");
+    setBondRateOverrideInput("");
+    setAlternateLabelInput("");
+    setAlternateAmountInput("");
+    setAlternates([]);
     setAncEstimate(null);
     setEditorEnabled(false);
     setEditorSourceMode("blank");
@@ -579,11 +589,18 @@ export default function Home() {
   const runAncEstimateFromText = (sourceText: string) => {
     const trimmedText = sourceText.trim();
     if (!trimmedText) return;
+    const parsedTaxRate = Number(taxRateOverrideInput);
+    const parsedBondRate = Number(bondRateOverrideInput);
+    const taxRateOverride = Number.isFinite(parsedTaxRate) && parsedTaxRate >= 0 ? parsedTaxRate / 100 : null;
+    const bondRateOverride = Number.isFinite(parsedBondRate) && parsedBondRate >= 0 ? parsedBondRate / 100 : null;
     const result = runAncEstimator({
       rawText: trimmedText,
       projectTitle: relevanceSummary.meta.projectTitle || file?.name || "ANC Estimate",
       clientName: relevanceSummary.meta.clientName || undefined,
       venueName: relevanceSummary.meta.venueName || undefined,
+      taxRateOverride,
+      bondRateOverride,
+      alternates,
     });
     setAncEstimate(result);
   };
@@ -597,16 +614,36 @@ export default function Home() {
 
     setIsRunningEstimate(true);
     try {
+      const parsedTaxRate = Number(taxRateOverrideInput);
+      const parsedBondRate = Number(bondRateOverrideInput);
+      const taxRateOverride = Number.isFinite(parsedTaxRate) && parsedTaxRate >= 0 ? parsedTaxRate / 100 : null;
+      const bondRateOverride = Number.isFinite(parsedBondRate) && parsedBondRate >= 0 ? parsedBondRate / 100 : null;
       const result = runAncEstimator({
         rawText: sourceText,
         projectTitle: relevanceSummary.meta.projectTitle || file?.name || "ANC Estimate",
         clientName: relevanceSummary.meta.clientName || undefined,
         venueName: relevanceSummary.meta.venueName || undefined,
+        taxRateOverride,
+        bondRateOverride,
+        alternates,
       });
       setAncEstimate(result);
     } finally {
       setIsRunningEstimate(false);
     }
+  };
+
+  const addAlternateAdjustment = () => {
+    const label = alternateLabelInput.trim();
+    const amount = Number(alternateAmountInput);
+    if (!label || !Number.isFinite(amount)) return;
+    setAlternates((prev) => [...prev, { label, amount }]);
+    setAlternateLabelInput("");
+    setAlternateAmountInput("");
+  };
+
+  const removeAlternateAdjustment = (index: number) => {
+    setAlternates((prev) => prev.filter((_, itemIndex) => itemIndex !== index));
   };
 
   const exportAncEstimateXlsx = async () => {
@@ -1430,8 +1467,80 @@ export default function Home() {
                         </button>
                       </div>
                     </div>
+                    <div className="mt-3 grid grid-cols-1 md:grid-cols-4 gap-2">
+                      <label className="text-xs text-slate-600">
+                        Tax %
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={taxRateOverrideInput}
+                          onChange={(e) => setTaxRateOverrideInput(e.target.value)}
+                          className="mt-1 w-full rounded-md border border-slate-200 px-2 py-1.5 text-xs text-slate-700"
+                          placeholder="e.g. 8.875"
+                        />
+                      </label>
+                      <label className="text-xs text-slate-600">
+                        Bond %
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={bondRateOverrideInput}
+                          onChange={(e) => setBondRateOverrideInput(e.target.value)}
+                          className="mt-1 w-full rounded-md border border-slate-200 px-2 py-1.5 text-xs text-slate-700"
+                          placeholder="e.g. 1.5"
+                        />
+                      </label>
+                      <label className="text-xs text-slate-600 md:col-span-2">
+                        Alternate Label
+                        <div className="mt-1 flex items-center gap-2">
+                          <input
+                            type="text"
+                            value={alternateLabelInput}
+                            onChange={(e) => setAlternateLabelInput(e.target.value)}
+                            className="w-full rounded-md border border-slate-200 px-2 py-1.5 text-xs text-slate-700"
+                            placeholder="Alternate #1 - deduct 2.5mm option"
+                          />
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={alternateAmountInput}
+                            onChange={(e) => setAlternateAmountInput(e.target.value)}
+                            className="w-36 rounded-md border border-slate-200 px-2 py-1.5 text-xs text-slate-700"
+                            placeholder="-102960"
+                          />
+                          <button
+                            type="button"
+                            onClick={addAlternateAdjustment}
+                            className="rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                          >
+                            Add Alt
+                          </button>
+                        </div>
+                      </label>
+                    </div>
+                    {alternates.length > 0 ? (
+                      <div className="mt-2 max-h-24 overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-2">
+                        {alternates.map((item, index) => (
+                          <div key={`${item.label}-${index}`} className="flex items-center justify-between gap-2 text-xs text-slate-700">
+                            <span className="truncate">{item.label}</span>
+                            <div className="flex items-center gap-2">
+                              <span>${item.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                              <button
+                                type="button"
+                                onClick={() => removeAlternateAdjustment(index)}
+                                className="text-red-600 hover:underline"
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
                     {ancEstimate ? (
-                      <div className="mt-3 grid grid-cols-2 md:grid-cols-5 gap-2 text-xs">
+                      <div className="mt-3 grid grid-cols-2 md:grid-cols-6 gap-2 text-xs">
                         <div className="rounded-lg border border-slate-200 bg-slate-50 p-2">
                           <p className="text-slate-500">Profile</p>
                           <p className="mt-1 font-semibold text-slate-800">{ancEstimate.display.label}</p>
@@ -1456,6 +1565,12 @@ export default function Home() {
                           <p>Bid Subtotal</p>
                           <p className="mt-1 font-bold">
                             ${ancEstimate.totals.bidFormSubtotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </p>
+                        </div>
+                        <div className="rounded-lg border border-orange-200 bg-orange-50 p-2 text-orange-900">
+                          <p>Adj Bid Subtotal</p>
+                          <p className="mt-1 font-bold">
+                            ${ancEstimate.totals.adjustedBidFormSubtotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </p>
                         </div>
                       </div>

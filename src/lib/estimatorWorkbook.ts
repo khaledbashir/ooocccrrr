@@ -48,7 +48,8 @@ export function buildEstimatorWorkbook(result: AncEstimateResult) {
     ["Gross Margin $", result.totals.grossMarginDollars, "Gross Margin %", result.totals.grossMarginPercent / 100],
     ["Tax Rate", result.totals.taxRate, "Tax Amount", result.totals.taxAmount],
     ["Bond Rate", result.totals.bondRate, "Bond Amount", result.totals.bondAmount],
-    ["Bid Form Subtotal", result.totals.bidFormSubtotal, "", ""],
+    ["Bid Form Subtotal", result.totals.bidFormSubtotal, "Alternate Adjustments", result.totals.alternateAdjustmentTotal],
+    ["Adjusted Bid Subtotal", result.totals.adjustedBidFormSubtotal, "", ""],
   ];
   const summarySheet = sheetFromAoa(summaryRows);
   summarySheet["!merges"] = [
@@ -115,11 +116,50 @@ export function buildEstimatorWorkbook(result: AncEstimateResult) {
     [`Tax (${(result.totals.taxRate * 100).toFixed(2)}%)`, result.totals.taxAmount],
     [`Bond (${(result.totals.bondRate * 100).toFixed(2)}%)`, result.totals.bondAmount],
     ["SUB TOTAL (BID FORM)", result.totals.bidFormSubtotal],
+    ["Alternate Adjustments", result.totals.alternateAdjustmentTotal],
+    ["ADJUSTED SUB TOTAL", result.totals.adjustedBidFormSubtotal],
   ];
   const bidSheet = sheetFromAoa(bidRows);
   setSheetLayout(bidSheet, [34, 18]);
   setColumnNumberFormat(bidSheet, 1, CURRENCY_FORMAT);
   XLSX.utils.book_append_sheet(workbook, bidSheet, "Bid Form");
+
+  const bidByDisplayRows: Array<Array<string | number>> = [
+    ["Display / Scope", "Cost", "Selling Price", "Margin $", "Margin %"],
+    [
+      `${result.display.label} (${result.display.totalSqFt} SqFt)`,
+      result.totals.totalCost,
+      result.totals.sellingPrice,
+      result.totals.grossMarginDollars,
+      result.totals.grossMarginPercent / 100,
+    ],
+    ["Tax", 0, result.totals.taxAmount, result.totals.taxAmount, 0],
+    ["Bond", 0, result.totals.bondAmount, result.totals.bondAmount, 0],
+    ["Bid Form Subtotal", result.totals.totalCost, result.totals.bidFormSubtotal, result.totals.bidFormSubtotal - result.totals.totalCost, (result.totals.bidFormSubtotal - result.totals.totalCost) / Math.max(result.totals.bidFormSubtotal, 1)],
+  ];
+  if (result.alternates.length > 0) {
+    for (const alternate of result.alternates) {
+      bidByDisplayRows.push([`Alternate: ${alternate.label}`, 0, alternate.amount, alternate.amount, 0]);
+    }
+    bidByDisplayRows.push(["Adjusted Bid Subtotal", result.totals.totalCost, result.totals.adjustedBidFormSubtotal, result.totals.adjustedBidFormSubtotal - result.totals.totalCost, (result.totals.adjustedBidFormSubtotal - result.totals.totalCost) / Math.max(result.totals.adjustedBidFormSubtotal, 1)]);
+  }
+  const bidByDisplaySheet = sheetFromAoa(bidByDisplayRows);
+  setSheetLayout(bidByDisplaySheet, [38, 16, 16, 16, 12]);
+  setColumnNumberFormat(bidByDisplaySheet, 1, CURRENCY_FORMAT);
+  setColumnNumberFormat(bidByDisplaySheet, 2, CURRENCY_FORMAT);
+  setColumnNumberFormat(bidByDisplaySheet, 3, CURRENCY_FORMAT);
+  setColumnNumberFormat(bidByDisplaySheet, 4, PERCENT_FORMAT);
+  XLSX.utils.book_append_sheet(workbook, bidByDisplaySheet, "Bid Form By Display");
+
+  const alternateRows: Array<Array<string | number>> = [
+    ["Alternate", "Adjustment Amount"],
+    ...result.alternates.map((item) => [item.label, item.amount]),
+    ["Total Alternate Adjustment", result.totals.alternateAdjustmentTotal],
+  ];
+  const alternateSheet = sheetFromAoa(alternateRows);
+  setSheetLayout(alternateSheet, [48, 18]);
+  setColumnNumberFormat(alternateSheet, 1, CURRENCY_FORMAT);
+  XLSX.utils.book_append_sheet(workbook, alternateSheet, "Alternates");
 
   const assumptionsRows: Array<Array<string | number>> = [
     ["Assumption / QA Check", "Status", "Estimator Notes"],
@@ -180,4 +220,3 @@ export function buildEstimatorWorkbook(result: AncEstimateResult) {
 
   return workbook;
 }
-
