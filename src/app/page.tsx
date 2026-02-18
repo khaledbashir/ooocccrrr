@@ -5,6 +5,7 @@ import {
   FileText,
   Upload,
   Download,
+  FolderUp,
   History,
   Loader2,
   Image as ImageIcon,
@@ -192,6 +193,10 @@ export default function Home() {
   const [isPreviewVisible, setIsPreviewVisible] = useState(true);
   const [activeExcelSheet, setActiveExcelSheet] = useState("");
   const [excelExtractionScope, setExcelExtractionScope] = useState<ExcelExtractionScope>("all");
+  const [batchFiles, setBatchFiles] = useState<File[]>([]);
+  const [activeBatchIndex, setActiveBatchIndex] = useState(0);
+  const [isBatchExtracting, setIsBatchExtracting] = useState(false);
+  const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0 });
   const [ocrProvider, setOcrProvider] = useState<OcrProvider>("kreuzberg");
   const [extractionMode, setExtractionMode] = useState<ExtractionMode>("rfp_workflow");
   const [editorEnabled, setEditorEnabled] = useState(false);
@@ -262,6 +267,19 @@ export default function Home() {
             ? "GLM-OCR (Ollama)"
             : "Kreuzberg OCR";
 
+  const loadBatchFile = useCallback(
+    (nextIndex: number) => {
+      if (batchFiles.length === 0) return;
+      const clampedIndex = Math.max(0, Math.min(nextIndex, batchFiles.length - 1));
+      const nextFile = batchFiles[clampedIndex];
+      setActiveBatchIndex(clampedIndex);
+      processFile(nextFile);
+      clearError();
+      setIsPreviewVisible(previewMode === "auto");
+    },
+    [batchFiles, clearError, previewMode, processFile],
+  );
+
   const fetchHistory = useCallback(async () => {
     try {
       const response = await axios.get("/api/extract");
@@ -279,9 +297,11 @@ export default function Home() {
   }, [fetchHistory]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selectedFile = e.target.files?.[0];
-    if (selectedFile) {
-      processFile(selectedFile);
+    const selectedFiles = Array.from(e.target.files || []);
+    if (selectedFiles.length > 0) {
+      setBatchFiles(selectedFiles);
+      setActiveBatchIndex(0);
+      processFile(selectedFiles[0]);
       setIsPreviewVisible(previewMode === "auto");
       clearError();
     }
@@ -301,9 +321,11 @@ export default function Home() {
     e.preventDefault();
     e.stopPropagation();
     
-    const droppedFile = e.dataTransfer.files?.[0];
-    if (droppedFile) {
-      processFile(droppedFile);
+    const droppedFiles = Array.from(e.dataTransfer.files || []);
+    if (droppedFiles.length > 0) {
+      setBatchFiles(droppedFiles);
+      setActiveBatchIndex(0);
+      processFile(droppedFiles[0]);
       setIsPreviewVisible(previewMode === "auto");
       clearError();
     }
@@ -319,7 +341,8 @@ export default function Home() {
   };
 
   const handleUpload = async () => {
-    if (!file) return;
+    const targetFile = batchFiles[activeBatchIndex] || file;
+    if (!targetFile) return;
     
     // Show warning if using Marker or Docling
     if (ocrProvider === 'marker' || ocrProvider === 'docling') {
@@ -331,7 +354,7 @@ export default function Home() {
     const extractedText = await extractContent(ocrProvider, extractionMode, {
       scope: excelExtractionScope,
       selectedSheetName: activeExcelSheetData?.name,
-    });
+    }, targetFile);
     if (extractedText) {
       setEditorSourceMode("full");
       setEditorEnabled(true);
@@ -346,6 +369,40 @@ export default function Home() {
       }
     }
     fetchHistory();
+  };
+
+  const handleExtractAll = async () => {
+    if (batchFiles.length === 0 || isBatchExtracting) return;
+    setIsBatchExtracting(true);
+    setBatchProgress({ current: 0, total: batchFiles.length });
+    setIsPreviewVisible(previewMode === "auto");
+
+    try {
+      for (let i = 0; i < batchFiles.length; i += 1) {
+        const currentFile = batchFiles[i];
+        setActiveBatchIndex(i);
+        processFile(currentFile);
+
+        const extractedText = await extractContent(
+          ocrProvider,
+          extractionMode,
+          {
+            scope: excelExtractionScope,
+            selectedSheetName: activeExcelSheetData?.name,
+          },
+          currentFile,
+        );
+
+        if (extractedText && extractionMode === "rfp_workflow" && i === batchFiles.length - 1) {
+          await runRelevanceAnalysis(extractedText);
+        }
+
+        setBatchProgress({ current: i + 1, total: batchFiles.length });
+      }
+    } finally {
+      setIsBatchExtracting(false);
+      void fetchHistory();
+    }
   };
 
   const handleSelectHistoryItem = (item: HistoryItem) => {
@@ -368,6 +425,10 @@ export default function Home() {
   const handleReset = () => {
     clearFile();
     clearError();
+    setBatchFiles([]);
+    setActiveBatchIndex(0);
+    setIsBatchExtracting(false);
+    setBatchProgress({ current: 0, total: 0 });
     setEditorEnabled(false);
     setEditorSourceMode("blank");
     setStructuredWorkbook(null);
@@ -777,6 +838,19 @@ export default function Home() {
                       {isExporting ? "Exporting..." : "Download Images"}
                     </button>
                   ) : null}
+                  {batchFiles.length > 1 ? (
+                    <button
+                      onClick={() => void handleExtractAll()}
+                      disabled={isExtracting || isBatchExtracting}
+                      className="inline-flex items-center gap-2 h-9 rounded-lg border border-emerald-200 bg-emerald-50 px-3 text-xs md:text-sm font-semibold text-emerald-700 hover:bg-emerald-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                      title="Extract all files in this batch"
+                    >
+                      <FolderUp size={14} />
+                      {isBatchExtracting
+                        ? `Extracting ${batchProgress.current}/${batchProgress.total}`
+                        : `Extract All (${batchFiles.length})`}
+                    </button>
+                  ) : null}
                   {file && (previewUrl || excelData) ? (
                     <button
                       onClick={() => setIsPreviewVisible((visible) => !visible)}
@@ -861,7 +935,7 @@ export default function Home() {
                   <p className="text-lg font-bold text-gray-800">Drop your file here</p>
                   <p className="text-sm text-gray-500 mt-1">PNG, JPG, PDF, XLSX or CSV</p>
                 </div>
-                <input type="file" className="hidden" onChange={handleFileChange} accept=".png,.jpg,.jpeg,.pdf,.xlsx,.xls,.csv" />
+                <input type="file" multiple className="hidden" onChange={handleFileChange} accept=".png,.jpg,.jpeg,.pdf,.xlsx,.xls,.csv" />
               </label>
             ) : (
               <div className="w-full h-full flex flex-col gap-4">
@@ -875,6 +949,11 @@ export default function Home() {
                     <div>
                       <h3 className="font-bold text-gray-900 leading-none">{file.name}</h3>
                       <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                        {batchFiles.length > 1 ? (
+                          <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-800">
+                            Doc {activeBatchIndex + 1} / {batchFiles.length}
+                          </span>
+                        ) : null}
                         <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-semibold text-indigo-700">
                           {extractionModeLabel}
                         </span>
@@ -884,7 +963,40 @@ export default function Home() {
                       </div>
                     </div>
                   </div>
-                  <button onClick={clearFile} className="text-xs text-red-500 hover:underline">Change File</button>
+                  <div className="flex items-center gap-2">
+                    {batchFiles.length > 1 ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => loadBatchFile(activeBatchIndex - 1)}
+                          disabled={activeBatchIndex <= 0 || isBatchExtracting}
+                          className="rounded-md border border-slate-200 px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                        >
+                          Prev
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => loadBatchFile(activeBatchIndex + 1)}
+                          disabled={activeBatchIndex >= batchFiles.length - 1 || isBatchExtracting}
+                          className="rounded-md border border-slate-200 px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                        >
+                          Next
+                        </button>
+                      </>
+                    ) : null}
+                    <button
+                      onClick={() => {
+                        clearFile();
+                        setBatchFiles([]);
+                        setActiveBatchIndex(0);
+                        setIsBatchExtracting(false);
+                        setBatchProgress({ current: 0, total: 0 });
+                      }}
+                      className="text-xs text-red-500 hover:underline"
+                    >
+                      Change File
+                    </button>
+                  </div>
                 </div>
                 
                 <div className="flex-1 bg-gray-100 rounded-2xl overflow-hidden border border-gray-200 shadow-inner flex items-center justify-center min-h-0">

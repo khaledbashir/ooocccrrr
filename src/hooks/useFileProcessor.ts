@@ -157,16 +157,19 @@ export function useFileProcessor() {
       ocrProvider: OcrProvider,
       _mode: ExtractionMode = 'rfp_workflow',
       excelOptions: ExcelExtractionOptions = {},
+      fileOverride?: File,
     ) => {
-    if (!state.file) return null;
-    const isExcel = isExcelFile(state.file.name);
+    const targetFile = fileOverride || state.file;
+    if (!targetFile) return null;
+    const isExcel = isExcelFile(targetFile.name);
 
     if (isExcel) {
       try {
         setState(prev => ({ ...prev, isExtracting: true, error: null }));
-        const excelExtraction = await parseExcelWorkbook(state.file, excelOptions);
+        const excelExtraction = await parseExcelWorkbook(targetFile, excelOptions);
         setState(prev => ({
           ...prev,
+          file: targetFile,
           excelData: excelExtraction.excelData,
           excelSheets: excelExtraction.excelSheets,
           jsonResult: excelExtraction.jsonResult,
@@ -186,7 +189,7 @@ export function useFileProcessor() {
       }
     }
 
-    const isImage = isImageFile(state.file.type);
+    const isImage = isImageFile(targetFile.type);
 
     if (ocrProvider === 'ollama_glm_ocr' && !isImage) {
       setState(prev => ({
@@ -199,7 +202,7 @@ export function useFileProcessor() {
     setState(prev => ({ ...prev, isExtracting: true, error: null }));
     
     const formData = new FormData();
-    formData.append('file', state.file);
+    formData.append('file', targetFile);
     formData.append('provider', ocrProvider);
 
     try {
@@ -224,6 +227,7 @@ export function useFileProcessor() {
       const extractedText = extractDisplayContent(data.data);
       setState(prev => ({
         ...prev,
+        file: targetFile,
         jsonResult: data.data,
         extractedContent: extractedText,
         isExtracting: false,
