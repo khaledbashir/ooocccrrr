@@ -1431,7 +1431,7 @@ export default function Home() {
                       </div>
                     </div>
                     {ancEstimate ? (
-                      <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                      <div className="mt-3 grid grid-cols-2 md:grid-cols-5 gap-2 text-xs">
                         <div className="rounded-lg border border-slate-200 bg-slate-50 p-2">
                           <p className="text-slate-500">Profile</p>
                           <p className="mt-1 font-semibold text-slate-800">{ancEstimate.display.label}</p>
@@ -1450,6 +1450,12 @@ export default function Home() {
                           <p>Selling Price</p>
                           <p className="mt-1 font-bold">
                             ${ancEstimate.totals.sellingPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </p>
+                        </div>
+                        <div className="rounded-lg border border-amber-200 bg-amber-50 p-2 text-amber-900">
+                          <p>Bid Subtotal</p>
+                          <p className="mt-1 font-bold">
+                            ${ancEstimate.totals.bidFormSubtotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </p>
                         </div>
                       </div>

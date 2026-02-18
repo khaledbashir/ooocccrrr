@@ -48,6 +48,11 @@ export type AncEstimateResult = {
   totals: {
     totalCost: number;
     sellingPrice: number;
+    taxRate: number;
+    taxAmount: number;
+    bondRate: number;
+    bondAmount: number;
+    bidFormSubtotal: number;
     grossMarginDollars: number;
     grossMarginPercent: number;
   };
@@ -80,6 +85,15 @@ function parseSqFtFromText(text: string): number {
   const candidates = [...sqftValues, ...dimensionAreas];
   if (candidates.length === 0) return 150;
   return Math.max(...candidates);
+}
+
+function parseRateFromKeyword(text: string, keyword: string): number {
+  const regex = new RegExp(`${keyword}[^\\d]{0,20}(\\d+(?:\\.\\d+)?)\\s*%`, "i");
+  const match = text.match(regex);
+  if (!match) return 0;
+  const rate = Number(match[1]);
+  if (!Number.isFinite(rate) || rate < 0) return 0;
+  return rate / 100;
 }
 
 function classifyDisplay(rawText: string): DisplayClassification {
@@ -178,6 +192,11 @@ export function runAncEstimator(input: AncEstimateInput): AncEstimateResult {
     stampedDrawings;
 
   const sellingPrice = totalCost / (1 - ANC_BUDGET_RATES.marginTarget);
+  const taxRate = parseRateFromKeyword(rawText, "tax");
+  const bondRate = parseRateFromKeyword(rawText, "bond");
+  const taxAmount = sellingPrice * taxRate;
+  const bondAmount = sellingPrice * bondRate;
+  const bidFormSubtotal = sellingPrice + taxAmount + bondAmount;
   const grossMarginDollars = sellingPrice - totalCost;
 
   const assumptions = [
@@ -288,6 +307,27 @@ export function runAncEstimator(input: AncEstimateInput): AncEstimateResult {
       formula: `${money(totalCost)} / (1 - 0.15)`,
       amount: money(sellingPrice),
     },
+    {
+      id: "PRICE-TAX",
+      group: "pricing",
+      label: "Tax",
+      formula: `${money(sellingPrice)} * ${taxRate.toFixed(4)}`,
+      amount: money(taxAmount),
+    },
+    {
+      id: "PRICE-BOND",
+      group: "pricing",
+      label: "Bond",
+      formula: `${money(sellingPrice)} * ${bondRate.toFixed(4)}`,
+      amount: money(bondAmount),
+    },
+    {
+      id: "PRICE-BID",
+      group: "pricing",
+      label: "Bid Form Subtotal",
+      formula: `Selling Price + Tax + Bond`,
+      amount: money(bidFormSubtotal),
+    },
   ];
 
   return {
@@ -311,6 +351,11 @@ export function runAncEstimator(input: AncEstimateInput): AncEstimateResult {
     totals: {
       totalCost: money(totalCost),
       sellingPrice: money(sellingPrice),
+      taxRate: Number(taxRate.toFixed(6)),
+      taxAmount: money(taxAmount),
+      bondRate: Number(bondRate.toFixed(6)),
+      bondAmount: money(bondAmount),
+      bidFormSubtotal: money(bidFormSubtotal),
       grossMarginDollars: money(grossMarginDollars),
       grossMarginPercent: money((grossMarginDollars / sellingPrice) * 100),
     },
@@ -342,6 +387,9 @@ export function ancEstimateToReportText(result: AncEstimateResult): string {
   lines.push("Totals");
   lines.push(`- Total Cost: ${formatMoney(result.totals.totalCost)}`);
   lines.push(`- Selling Price: ${formatMoney(result.totals.sellingPrice)}`);
+  lines.push(`- Tax (${(result.totals.taxRate * 100).toFixed(2)}%): ${formatMoney(result.totals.taxAmount)}`);
+  lines.push(`- Bond (${(result.totals.bondRate * 100).toFixed(2)}%): ${formatMoney(result.totals.bondAmount)}`);
+  lines.push(`- Bid Form Subtotal: ${formatMoney(result.totals.bidFormSubtotal)}`);
   lines.push(`- Gross Margin: ${formatMoney(result.totals.grossMarginDollars)} (${result.totals.grossMarginPercent.toFixed(2)}%)`);
   lines.push("");
   lines.push("Assumptions");
@@ -350,4 +398,3 @@ export function ancEstimateToReportText(result: AncEstimateResult): string {
   }
   return lines.join("\n");
 }
-
