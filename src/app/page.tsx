@@ -37,7 +37,7 @@ import {
   structuredWorkbookToMarkdown,
   StructuredWorkbook,
 } from "@/lib/rfpWorkbook";
-import { useFileProcessor } from "@/hooks/useFileProcessor";
+import { ExtractionMode, useFileProcessor } from "@/hooks/useFileProcessor";
 import { usePdfExport } from "@/hooks/usePdfExport";
 import { HistoryItem } from "@/types";
 
@@ -164,26 +164,7 @@ function diffStructuredWorkbooks(previous: StructuredWorkbook | null, next: Stru
 }
 
 export default function Home() {
-  const workbookImportInputRef = useRef<HTMLInputElement>(null);
-  const [history, setHistory] = useState<HistoryItem[]>([]);
-  const [activeTab, setActiveTab] = useState<"document" | "json">("document");
-  const [isNavOpen, setIsNavOpen] = useState(true);
-  const [isPreviewOpen, setIsPreviewOpen] = useState(true);
-  const [isEditorOpen, setIsEditorOpen] = useState(true);
-  const [previewMode, setPreviewMode] = useState<"auto" | "on-demand">("auto");
-  const [isPreviewVisible, setIsPreviewVisible] = useState(true);
-  const [activeExcelSheet, setActiveExcelSheet] = useState("");
-  const [ocrProvider, setOcrProvider] = useState<OcrProvider>("kreuzberg");
-  const [editorEnabled, setEditorEnabled] = useState(false);
-  const [editorSourceMode, setEditorSourceMode] = useState<EditorSourceMode>("full");
-  const [workbookEditorContent, setWorkbookEditorContent] = useState("");
-  const [isAnalyzingRelevance, setIsAnalyzingRelevance] = useState(false);
-  const [isGeneratingWorkbook, setIsGeneratingWorkbook] = useState(false);
-  const [structuredWorkbook, setStructuredWorkbook] = useState<StructuredWorkbook | null>(null);
-  const [workbookDiff, setWorkbookDiff] = useState<WorkbookDiffSummary | null>(null);
-  const [workbookSheets, setWorkbookSheets] = useState<WorkbookSheetPreview[]>([]);
-  const [activeWorkbookSheet, setActiveWorkbookSheet] = useState<string>("");
-  const [relevanceSummary, setRelevanceSummary] = useState<RelevanceSummary>({
+  const buildEmptyRelevanceSummary = (): RelevanceSummary => ({
     total: 0,
     processed: 0,
     progress: 0,
@@ -200,6 +181,28 @@ export default function Home() {
       projectTitle: null,
     },
   });
+
+  const workbookImportInputRef = useRef<HTMLInputElement>(null);
+  const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [activeTab, setActiveTab] = useState<"document" | "json">("document");
+  const [isNavOpen, setIsNavOpen] = useState(true);
+  const [isPreviewOpen, setIsPreviewOpen] = useState(true);
+  const [isEditorOpen, setIsEditorOpen] = useState(true);
+  const [previewMode, setPreviewMode] = useState<"auto" | "on-demand">("auto");
+  const [isPreviewVisible, setIsPreviewVisible] = useState(true);
+  const [activeExcelSheet, setActiveExcelSheet] = useState("");
+  const [ocrProvider, setOcrProvider] = useState<OcrProvider>("kreuzberg");
+  const [extractionMode, setExtractionMode] = useState<ExtractionMode>("rfp_workflow");
+  const [editorEnabled, setEditorEnabled] = useState(false);
+  const [editorSourceMode, setEditorSourceMode] = useState<EditorSourceMode>("full");
+  const [workbookEditorContent, setWorkbookEditorContent] = useState("");
+  const [isAnalyzingRelevance, setIsAnalyzingRelevance] = useState(false);
+  const [isGeneratingWorkbook, setIsGeneratingWorkbook] = useState(false);
+  const [structuredWorkbook, setStructuredWorkbook] = useState<StructuredWorkbook | null>(null);
+  const [workbookDiff, setWorkbookDiff] = useState<WorkbookDiffSummary | null>(null);
+  const [workbookSheets, setWorkbookSheets] = useState<WorkbookSheetPreview[]>([]);
+  const [activeWorkbookSheet, setActiveWorkbookSheet] = useState<string>("");
+  const [relevanceSummary, setRelevanceSummary] = useState<RelevanceSummary>(buildEmptyRelevanceSummary);
   
   const {
     file,
@@ -219,15 +222,17 @@ export default function Home() {
   
   const { isExporting, exportPdfToImages } = usePdfExport();
 
-  const workflowSteps = [
-    "Receive RFP",
-    "Extract Text",
-    "Filter Relevance",
-    "Build Workbook",
-    "Edit + Export",
-  ] as const;
+  const workflowSteps =
+    extractionMode === "rfp_workflow"
+      ? (["Receive RFP", "Extract Text", "Filter Relevance", "Build Workbook", "Edit + Export"] as const)
+      : (["Receive File", "Extract All Tabs", "Edit + Export"] as const);
 
   const workflowIndex = (() => {
+    if (extractionMode === "ocr_all") {
+      if (!file) return 0;
+      if (!extractedContent) return 1;
+      return 2;
+    }
     if (!file) return 0;
     if (!extractedContent) return 1;
     if (relevanceSummary.total === 0) return 2;
@@ -237,6 +242,17 @@ export default function Home() {
 
   const activeExcelSheetData =
     excelSheets.find((sheet) => sheet.name === activeExcelSheet) || excelSheets[0] || null;
+  const extractionModeLabel = extractionMode === "rfp_workflow" ? "RFP Workflow" : "OCR All Tabs";
+  const providerLabel =
+    ocrProvider === "marker"
+      ? "Marker"
+      : ocrProvider === "docling"
+        ? "Docling"
+        : ocrProvider === "mistral"
+          ? "Mistral OCR"
+          : ocrProvider === "ollama_glm_ocr"
+            ? "GLM-OCR (Ollama)"
+            : "Kreuzberg OCR";
 
   const fetchHistory = useCallback(async () => {
     try {
@@ -300,11 +316,19 @@ export default function Home() {
       console.warn(`${serviceName} service may not be running. Expected at: ${serviceUrl}`);
     }
     
-    const extractedText = await extractContent(ocrProvider);
+    const extractedText = await extractContent(ocrProvider, extractionMode);
     if (extractedText) {
       setEditorSourceMode("full");
       setEditorEnabled(true);
-      await runRelevanceAnalysis(extractedText);
+      if (extractionMode === "rfp_workflow") {
+        await runRelevanceAnalysis(extractedText);
+      } else {
+        setStructuredWorkbook(null);
+        setWorkbookDiff(null);
+        setWorkbookSheets([]);
+        setActiveWorkbookSheet("");
+        setRelevanceSummary(buildEmptyRelevanceSummary());
+      }
     }
     fetchHistory();
   };
@@ -313,28 +337,16 @@ export default function Home() {
     setHistoryItem(item);
     setEditorSourceMode("full");
     setEditorEnabled(true);
+    if (extractionMode !== "rfp_workflow") {
+      setRelevanceSummary(buildEmptyRelevanceSummary());
+      return;
+    }
     try {
       const parsed = JSON.parse(item.content);
       const text = extractDisplayContent(parsed);
       void runRelevanceAnalysis(text);
     } catch {
-      setRelevanceSummary({
-        total: 0,
-        processed: 0,
-        progress: 0,
-        relevant: 0,
-        maybe: 0,
-        irrelevant: 0,
-        riskFlagged: 0,
-        drawingCandidates: 0,
-        chunks: [],
-        relevantContent: "",
-        meta: {
-          clientName: null,
-          venueName: null,
-          projectTitle: null,
-        },
-      });
+      setRelevanceSummary(buildEmptyRelevanceSummary());
     }
   };
 
@@ -348,23 +360,7 @@ export default function Home() {
     setWorkbookEditorContent("");
     setWorkbookSheets([]);
     setActiveWorkbookSheet("");
-    setRelevanceSummary({
-      total: 0,
-      processed: 0,
-      progress: 0,
-      relevant: 0,
-      maybe: 0,
-      irrelevant: 0,
-      riskFlagged: 0,
-      drawingCandidates: 0,
-      chunks: [],
-      relevantContent: "",
-      meta: {
-        clientName: null,
-        venueName: null,
-        projectTitle: null,
-      },
-    });
+    setRelevanceSummary(buildEmptyRelevanceSummary());
     setIsPreviewVisible(true);
   };
 
@@ -701,12 +697,20 @@ export default function Home() {
         <section className={`${isPreviewOpen ? "flex-1" : "w-14"} flex flex-col bg-white border border-slate-200 rounded-2xl min-w-0 overflow-hidden transition-all`}>
           {isPreviewOpen ? (
             <>
-              <header className="h-16 border-b flex items-center justify-between px-6 bg-white z-10 sticky top-0">
-                <h2 className="font-bold text-gray-800 flex items-center gap-2">
-                  <Upload size={18} className="text-indigo-600" />
-                  Document Preview
-                </h2>
-                <div className="flex items-center gap-2">
+              <header className="border-b px-4 py-3 bg-white z-10 sticky top-0">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h2 className="font-bold text-gray-800 flex items-center gap-2">
+                    <Upload size={18} className="text-indigo-600" />
+                    Document Preview
+                  </h2>
+                  <div className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1">
+                    <span className="text-[11px] font-semibold text-slate-500">Mode</span>
+                    <span className="rounded-md bg-indigo-100 px-2 py-0.5 text-[11px] font-semibold text-indigo-800">
+                      {extractionModeLabel}
+                    </span>
+                  </div>
+                </div>
+                <div className="mt-3 flex flex-wrap items-center gap-2">
                   <button
                     onClick={handleReset}
                     className="inline-flex items-center gap-1.5 h-9 rounded-lg border border-red-200 bg-red-50 px-3 text-xs font-semibold text-red-700 hover:bg-red-100"
@@ -716,9 +720,18 @@ export default function Home() {
                     Reset
                   </button>
                   <select
+                    value={extractionMode}
+                    onChange={(e) => setExtractionMode(e.target.value as ExtractionMode)}
+                    className="h-9 rounded-lg border border-slate-200 px-3 text-xs md:text-sm font-medium text-slate-700 bg-white"
+                    title="Extraction mode"
+                  >
+                    <option value="rfp_workflow">RFP Workflow</option>
+                    <option value="ocr_all">OCR All Tabs</option>
+                  </select>
+                  <select
                     value={ocrProvider}
                     onChange={(e) => setOcrProvider(e.target.value as OcrProvider)}
-                    className="h-9 rounded-lg border border-slate-200 px-3 text-sm font-medium text-slate-700 bg-white"
+                    className="h-9 rounded-lg border border-slate-200 px-3 text-xs md:text-sm font-medium text-slate-700 bg-white"
                     title="OCR provider"
                   >
                     <option value="marker">Marker (Best Formatting)</option>
@@ -773,7 +786,7 @@ export default function Home() {
                   {file && !isExtracting && !extractedContent && !error && (
                     <button
                       onClick={handleUpload}
-                      className="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 transition-all text-sm font-semibold shadow-md"
+                      className="h-9 bg-indigo-600 text-white px-4 rounded-lg hover:bg-indigo-700 transition-all text-xs md:text-sm font-semibold shadow-sm"
                     >
                       Extract Content
                     </button>
@@ -835,15 +848,14 @@ export default function Home() {
                     </div>
                     <div>
                       <h3 className="font-bold text-gray-900 leading-none">{file.name}</h3>
-                      <p className="text-xs text-gray-400 mt-1">
-                        Ready for extraction • {
-                          ocrProvider === "marker" ? "Marker (Best Formatting)" :
-                          ocrProvider === "docling" ? "Docling (Precise Tables)" :
-                          ocrProvider === "mistral" ? "Mistral OCR" :
-                          ocrProvider === "ollama_glm_ocr" ? "GLM-OCR (Ollama)" :
-                          "Kreuzberg OCR"
-                        }
-                      </p>
+                      <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                        <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-semibold text-indigo-700">
+                          {extractionModeLabel}
+                        </span>
+                        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-700">
+                          {providerLabel}
+                        </span>
+                      </div>
                     </div>
                   </div>
                   <button onClick={clearFile} className="text-xs text-red-500 hover:underline">Change File</button>
@@ -903,7 +915,7 @@ export default function Home() {
                   )}
                 </div>
 
-                {(isAnalyzingRelevance || relevanceSummary.total > 0) && (
+                {extractionMode === "rfp_workflow" && (isAnalyzingRelevance || relevanceSummary.total > 0) && (
                   <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
                     <div className="flex items-center justify-between gap-3">
                       <div className="flex items-center gap-2">

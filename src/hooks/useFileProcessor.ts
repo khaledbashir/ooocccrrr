@@ -3,6 +3,8 @@ import { OcrProvider, ERROR_MESSAGES } from '@/lib/constants';
 import { isExcelFile, isImageFile, isPdfFile, extractDisplayContent } from '@/lib/utils';
 import { FileProcessingState, HistoryItem } from '@/types';
 
+export type ExtractionMode = 'rfp_workflow' | 'ocr_all';
+
 async function parseJsonSafely(response: Response) {
   const text = await response.text();
   try {
@@ -17,6 +19,53 @@ function normalizeErrorMessage(message: string): string {
     return 'Upstream OCR service returned an HTML error page. Verify the provider URL and ensure the service is running.';
   }
   return message;
+}
+
+async function parseExcelWorkbook(file: File) {
+  const buffer = await file.arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+  const XLSX = await import('xlsx');
+  const workbook = XLSX.read(bytes, { type: 'array' });
+
+  const sheets = workbook.SheetNames.map((sheetName) => {
+    const sheet = workbook.Sheets[sheetName];
+    const ref = sheet?.['!ref'];
+    const decodedRange = ref ? XLSX.utils.decode_range(ref) : null;
+    const rowCount = decodedRange ? decodedRange.e.r + 1 : 0;
+    const csv = XLSX.utils.sheet_to_csv(sheet, { blankrows: false }).trim();
+    return {
+      name: sheetName,
+      html: XLSX.utils.sheet_to_html(sheet),
+      csv,
+      rowCount,
+    };
+  });
+
+  const firstSheetHtml = sheets[0]?.html || null;
+  const markdownSections = sheets.map((sheet) => {
+    const content = sheet.csv || '(empty sheet)';
+    return `## Sheet: ${sheet.name}\n\n\`\`\`csv\n${content}\n\`\`\``;
+  });
+
+  return {
+    excelData: firstSheetHtml,
+    excelSheets: sheets.map((sheet) => ({
+      name: sheet.name,
+      html: sheet.html,
+      rowCount: sheet.rowCount,
+    })),
+    extractedText: `# Workbook: ${file.name}\n\n${markdownSections.join('\n\n')}`,
+    jsonResult: {
+      provider: 'local_excel_parser',
+      mode: 'all_worksheets',
+      workbook: file.name,
+      sheets: sheets.map((sheet) => ({
+        name: sheet.name,
+        rowCount: sheet.rowCount,
+        csv: sheet.csv,
+      })),
+    },
+  };
 }
 
 export function useFileProcessor() {
@@ -87,8 +136,34 @@ export function useFileProcessor() {
     }
   }, []);
 
-  const extractContent = useCallback(async (ocrProvider: OcrProvider) => {
+  const extractContent = useCallback(async (ocrProvider: OcrProvider, _mode: ExtractionMode = 'rfp_workflow') => {
     if (!state.file) return null;
+    const isExcel = isExcelFile(state.file.name);
+
+    if (isExcel) {
+      try {
+        setState(prev => ({ ...prev, isExtracting: true, error: null }));
+        const excelExtraction = await parseExcelWorkbook(state.file);
+        setState(prev => ({
+          ...prev,
+          excelData: excelExtraction.excelData,
+          excelSheets: excelExtraction.excelSheets,
+          jsonResult: excelExtraction.jsonResult,
+          extractedContent: excelExtraction.extractedText,
+          isExtracting: false,
+        }));
+        return excelExtraction.extractedText;
+      } catch (error: unknown) {
+        const errorMessage =
+          error instanceof Error ? error.message : ERROR_MESSAGES.UPSTREAM_REQUEST_FAILED;
+        setState(prev => ({
+          ...prev,
+          error: normalizeErrorMessage(errorMessage),
+          isExtracting: false,
+        }));
+        return null;
+      }
+    }
 
     const isImage = isImageFile(state.file.type);
 
