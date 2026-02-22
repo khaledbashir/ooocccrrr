@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { OcrProvider, ERROR_MESSAGES, UI_STATES } from '@/lib/constants';
-import { inferMimeType } from '@/lib/utils';
+import { OcrProvider, ERROR_MESSAGES, FILE_TYPES, UI_STATES } from '@/lib/constants';
+import { inferMimeType, parsePdfPageSelection } from '@/lib/utils';
 import { extractContent } from '@/lib/ocrService';
 import { ApiResponse, ExtractionResponse } from '@/types';
+import { PDFDocument } from 'pdf-lib';
 
 export async function POST(req: Request): Promise<NextResponse<ExtractionResponse | { error: string }>> {
   try {
@@ -27,8 +28,36 @@ export async function POST(req: Request): Promise<NextResponse<ExtractionRespons
 
     const normalizedType = file.type && file.type !== 'application/octet-stream' ? file.type : inferMimeType(file.name);
     const normalizedFile = new File([file], file.name, { type: normalizedType });
+    const pageSelectionInput = (formData.get('pageSelection') as string) ?? '';
+    let fileForExtraction: File = normalizedFile;
 
-    const upstream: ApiResponse = await extractContent(normalizedFile, provider);
+    const trimmedSelection = pageSelectionInput.trim();
+    if (trimmedSelection && normalizedType === FILE_TYPES.PDF) {
+      const fileBuffer = Buffer.from(await normalizedFile.arrayBuffer());
+      const pdfDoc = await PDFDocument.load(fileBuffer);
+      const selectionResult = parsePdfPageSelection(trimmedSelection, pdfDoc.getPageCount());
+      if ('error' in selectionResult) {
+        return NextResponse.json({ error: selectionResult.error }, { status: 400 });
+      }
+
+      if (selectionResult.pageNumbers.length > 0) {
+        const sequentialAllPages =
+          selectionResult.pageNumbers.length === pdfDoc.getPageCount() &&
+          selectionResult.pageNumbers.every((page, index) => page === index + 1);
+        if (!sequentialAllPages) {
+          const subsetPdf = await PDFDocument.create();
+          const pages = await subsetPdf.copyPages(
+            pdfDoc,
+            selectionResult.pageNumbers.map((page) => page - 1),
+          );
+          pages.forEach((page) => subsetPdf.addPage(page));
+          const subsetBytes = await subsetPdf.save();
+          fileForExtraction = new File([subsetBytes], file.name, { type: normalizedType });
+        }
+      }
+    }
+
+    const upstream: ApiResponse = await extractContent(fileForExtraction, provider);
 
     if (!upstream.ok) {
       const upstreamMessage =

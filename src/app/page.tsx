@@ -372,6 +372,7 @@ export default function Home() {
     const extractedText = await extractContent(ocrProvider, extractionMode, {
       scope: excelExtractionScope,
       selectedSheetName: activeExcelSheetData?.name,
+      pageSelection: pdfPageSelection,
     }, targetFile);
     setAncEstimate(null);
     if (extractedText) {
@@ -410,6 +411,7 @@ export default function Home() {
           {
             scope: excelExtractionScope,
             selectedSheetName: activeExcelSheetData?.name,
+            pageSelection: pdfPageSelection,
           },
           currentFile,
         );

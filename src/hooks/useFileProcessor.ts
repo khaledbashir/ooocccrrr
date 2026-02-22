@@ -84,6 +84,10 @@ async function parseExcelWorkbook(file: File, options: ExcelExtractionOptions = 
   };
 }
 
+export type ExtractionOptions = ExcelExtractionOptions & {
+  pageSelection?: string;
+};
+
 export function useFileProcessor() {
   const [state, setState] = useState<FileProcessingState>({
     file: null,
@@ -156,7 +160,7 @@ export function useFileProcessor() {
     async (
       ocrProvider: OcrProvider,
       _mode: ExtractionMode = 'rfp_workflow',
-      excelOptions: ExcelExtractionOptions = {},
+      options: ExtractionOptions = {},
       fileOverride?: File,
     ) => {
     const targetFile = fileOverride || state.file;
@@ -166,6 +170,7 @@ export function useFileProcessor() {
     if (isExcel) {
       try {
         setState(prev => ({ ...prev, isExtracting: true, error: null }));
+        const { pageSelection, ...excelOptions } = options;
         const excelExtraction = await parseExcelWorkbook(targetFile, excelOptions);
         setState(prev => ({
           ...prev,
@@ -202,8 +207,11 @@ export function useFileProcessor() {
     setState(prev => ({ ...prev, isExtracting: true, error: null }));
     
     const formData = new FormData();
-    formData.append('file', targetFile);
-    formData.append('provider', ocrProvider);
+        formData.append('file', targetFile);
+        formData.append('provider', ocrProvider);
+        if (options.pageSelection) {
+          formData.append('pageSelection', options.pageSelection);
+        }
 
     try {
       const response = await fetch('/api/extract', {
