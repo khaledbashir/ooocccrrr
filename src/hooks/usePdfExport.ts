@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { UI_STATES } from '@/lib/constants';
+import { parsePdfPageSelection } from '@/lib/utils';
 
 export function usePdfExport() {
   const [isExporting, setIsExporting] = useState(false);
 
-  const exportPdfToImages = async (file: File) => {
+  const exportPdfToImages = async (file: File, selection?: string) => {
     if (!file) return;
 
     try {
@@ -20,8 +21,16 @@ export function usePdfExport() {
       const loadingTask = pdfjs.getDocument({ data: pdfData });
       const pdf = await loadingTask.promise;
       const baseName = file.name.replace(/\.pdf$/i, '') || 'document';
+      const selectionResult = parsePdfPageSelection(selection ?? '', pdf.numPages);
+      if ('error' in selectionResult) {
+        throw new Error(selectionResult.error);
+      }
+      const pagesToRender =
+        selectionResult.pageNumbers.length > 0
+          ? selectionResult.pageNumbers
+          : Array.from({ length: pdf.numPages }, (_, index) => index + 1);
 
-      for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+      for (const pageNumber of pagesToRender) {
         const page = await pdf.getPage(pageNumber);
         const viewport = page.getViewport({ scale: UI_STATES.PDF_EXPORT_SCALE });
 

@@ -164,3 +164,60 @@ export function isImageFile(mimeType: string): boolean {
 export function isPdfFile(mimeType: string, filename: string): boolean {
   return mimeType === FILE_TYPES.PDF || filename.toLowerCase().endsWith('.pdf');
 }
+
+type PdfPageSelectionResult =
+  | { pageNumbers: number[] }
+  | { error: string };
+
+export function parsePdfPageSelection(
+  selection: string,
+  maxPage: number,
+): PdfPageSelectionResult {
+  const trimmed = selection.trim();
+  if (trimmed === "") {
+    return { pageNumbers: [] };
+  }
+
+  const tokens = trimmed
+    .split(/[;,]+/)
+    .map((token) => token.trim())
+    .filter(Boolean);
+
+  if (tokens.length === 0) {
+    return { pageNumbers: [] };
+  }
+
+  const pageSet = new Set<number>();
+
+  for (const token of tokens) {
+    const rangeMatch = token.match(/^(\d+)\s*-\s*(\d+)$/);
+    if (rangeMatch) {
+      const start = Number(rangeMatch[1]);
+      const end = Number(rangeMatch[2]);
+      if (start > end) {
+        return { error: `Page range ${token} is invalid; start must be before end.` };
+      }
+      if (start < 1 || end > maxPage) {
+        return { error: `Page ranges must fall between 1 and ${maxPage}.` };
+      }
+      for (let page = start; page <= end; page += 1) {
+        pageSet.add(page);
+      }
+      continue;
+    }
+
+    const singleMatch = token.match(/^(\d+)$/);
+    if (singleMatch) {
+      const page = Number(singleMatch[1]);
+      if (page < 1 || page > maxPage) {
+        return { error: `Page numbers must be between 1 and ${maxPage}.` };
+      }
+      pageSet.add(page);
+      continue;
+    }
+
+    return { error: `Invalid page selection "${token}". Use numbers or ranges like 2-5.` };
+  }
+
+  return { pageNumbers: Array.from(pageSet).sort((a, b) => a - b) };
+}

@@ -195,6 +195,7 @@ export default function Home() {
   const [isEditorOpen, setIsEditorOpen] = useState(true);
   const [previewMode, setPreviewMode] = useState<"auto" | "on-demand">("auto");
   const [isPreviewVisible, setIsPreviewVisible] = useState(true);
+  const [pdfPageSelection, setPdfPageSelection] = useState("");
   const [activeExcelSheet, setActiveExcelSheet] = useState("");
   const [excelExtractionScope, setExcelExtractionScope] = useState<ExcelExtractionScope>("all");
   const [batchFiles, setBatchFiles] = useState<File[]>([]);
@@ -353,7 +354,7 @@ export default function Home() {
       alert("Download Images works for PDF files only.");
       return;
     }
-    await exportPdfToImages(file);
+    await exportPdfToImages(file, pdfPageSelection);
   };
 
   const handleUpload = async () => {
@@ -473,6 +474,7 @@ export default function Home() {
     setStructuredDisplays([]);
     setRelevanceSummary(buildEmptyRelevanceSummary());
     setIsPreviewVisible(true);
+    setPdfPageSelection("");
   };
 
   const handleEnableEditor = () => {
@@ -998,6 +1000,25 @@ export default function Home() {
                       {isExporting ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
                       {isExporting ? "Exporting..." : "Download Images"}
                     </button>
+                  ) : null}
+                  {file && isPdfSelectedFile ? (
+                    <div className="flex flex-col gap-1 w-40">
+                      <label
+                        htmlFor="pdf-page-selection"
+                        className="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500"
+                      >
+                        Pages
+                      </label>
+                      <input
+                        id="pdf-page-selection"
+                        type="text"
+                        value={pdfPageSelection}
+                        onChange={(event) => setPdfPageSelection(event.target.value)}
+                        placeholder="e.g. 1,3-5"
+                        className="h-9 rounded-lg border border-slate-200 px-3 text-xs font-medium text-slate-700 bg-white focus-visible:outline-indigo-600"
+                      />
+                      <span className="text-[10px] text-slate-400">Leave blank for every page</span>
+                    </div>
                   ) : null}
                   {batchFiles.length > 1 ? (
                     <button
