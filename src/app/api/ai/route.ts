@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 type AiAction = "summarize" | "improve" | "expand" | "custom";
-type AiProvider = "z-ai" | "nvidia" | "groq";
+type AiProvider = "z-ai" | "nvidia" | "groq" | "minimax" | "mercury";
 
 type AiRequestBody = {
   action?: AiAction;
@@ -166,15 +166,29 @@ const PROVIDERS: Record<AiProvider, ProviderConfig> = {
     modelEnv: "GROQ_MODEL",
     defaultModel: "llama-3.3-70b-versatile",
   },
+  minimax: {
+    keyEnv: "MINIMAX_API_KEY",
+    baseUrlEnv: "MINIMAX_BASE_URL",
+    defaultBaseUrl: "https://api.minimax.io/v1",
+    modelEnv: "MINIMAX_MODEL",
+    defaultModel: "MiniMax-M1",
+  },
+  mercury: {
+    keyEnv: "MERCURY_API_KEY",
+    baseUrlEnv: "MERCURY_BASE_URL",
+    defaultBaseUrl: "https://api.inceptionlabs.ai/v1",
+    modelEnv: "MERCURY_MODEL",
+    defaultModel: "mercury-2",
+  },
 };
 
 function getProviderFromQuery(value: string | null): AiProvider | null {
-  if (value === "z-ai" || value === "nvidia" || value === "groq") return value;
+  if (value === "z-ai" || value === "nvidia" || value === "groq" || value === "minimax" || value === "mercury") return value;
   return null;
 }
 
 function isAiProvider(value: unknown): value is AiProvider {
-  return value === "z-ai" || value === "nvidia" || value === "groq";
+  return value === "z-ai" || value === "nvidia" || value === "groq" || value === "minimax" || value === "mercury";
 }
 
 function getProviderConfig(provider: AiProvider) {

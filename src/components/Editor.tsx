@@ -24,7 +24,7 @@ import {
 import { EditorProps } from "@/types";
 
 type AiAction = "summarize" | "improve" | "expand" | "custom";
-type AiProvider = "z-ai" | "nvidia" | "groq";
+type AiProvider = "z-ai" | "nvidia" | "groq" | "minimax" | "mercury";
 
 type InlineNode = {
   text?: string;
@@ -417,6 +417,8 @@ export default function Editor({ initialContent, onChange }: EditorProps) {
                 <option value="groq">Groq</option>
                 <option value="nvidia">NVIDIA</option>
                 <option value="z-ai">Z AI</option>
+                <option value="minimax">MiniMax</option>
+                <option value="mercury">Mercury 2</option>
               </select>
               <select
                 value={model}
