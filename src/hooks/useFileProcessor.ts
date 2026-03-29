@@ -29,7 +29,7 @@ type ExcelExtractionOptions = {
 
 async function parseExcelWorkbook(file: File, options: ExcelExtractionOptions = {}) {
   const buffer = await file.arrayBuffer();
-  const bytes = new Uint8Array(buffer);
+  const bytes = new Uint8Array(buffer) as unknown as ArrayBuffer;
   const XLSX = await import('xlsx');
   const workbook = XLSX.read(bytes, { type: 'array' });
   const scope = options.scope ?? 'all';

@@ -52,7 +52,7 @@ export async function POST(req: Request): Promise<NextResponse<ExtractionRespons
           );
           pages.forEach((page) => subsetPdf.addPage(page));
           const subsetBytes = await subsetPdf.save();
-          fileForExtraction = new File([subsetBytes], file.name, { type: normalizedType });
+          fileForExtraction = new File([subsetBytes as BlobPart], file.name, { type: normalizedType });
         }
       }
     }
