@@ -39,10 +39,22 @@ export interface PdfTextItem {
   width: number;
 }
 
+export interface BrochureSpecColumnSelection {
+  id: string;
+  label: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  textSample: string[];
+  detectionSource: "pdf_text";
+}
+
 export interface BrochurePageReference {
   brochureId: string;
   brochureName: string;
   pageNumber: number;
+  specColumn?: BrochureSpecColumnSelection | null;
   updatedAt: string;
 }
 

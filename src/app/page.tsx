@@ -50,7 +50,7 @@ import {
   revokeBrochureUrls,
   saveProposalBrochureState,
 } from "@/lib/proposalBrochureStore";
-import { HistoryItem, ProposalBrochureAttachment } from "@/types";
+import { BrochureSpecColumnSelection, HistoryItem, ProposalBrochureAttachment } from "@/types";
 
 // Dynamically import Editor to avoid SSR issues with BlockNote/Mantine
 const Editor = dynamic(() => import("@/components/Editor"), { ssr: false });
@@ -490,7 +490,12 @@ export default function Home() {
     e.currentTarget.value = "";
   };
 
-  const assignBrochurePageToDisplay = (displayId: string, brochureId: string, pageNumber: number) => {
+  const assignBrochurePageToDisplay = (
+    displayId: string,
+    brochureId: string,
+    pageNumber: number,
+    specColumn?: BrochureSpecColumnSelection | null,
+  ) => {
     const brochure = brochures.find((item) => item.id === brochureId);
     if (!brochure) return;
 
@@ -503,6 +508,7 @@ export default function Home() {
                 brochureId,
                 brochureName: brochure.name,
                 pageNumber,
+                specColumn: specColumn ?? null,
                 updatedAt: new Date().toISOString(),
               },
             }
