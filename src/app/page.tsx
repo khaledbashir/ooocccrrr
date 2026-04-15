@@ -44,11 +44,20 @@ import { StructuredDisplay, extractStructuredDisplays } from "@/lib/displayExtra
 import { buildEstimatorWorkbook } from "@/lib/estimatorWorkbook";
 import { ExcelExtractionScope, ExtractionMode, useFileProcessor } from "@/hooks/useFileProcessor";
 import { usePdfExport } from "@/hooks/usePdfExport";
-import { HistoryItem } from "@/types";
+import {
+  buildProposalStorageKey,
+  loadProposalBrochureState,
+  mergeDisplaysWithBrochureRefs,
+  removeProposalBrochure,
+  revokeBrochureUrls,
+  saveProposalBrochureState,
+} from "@/lib/proposalBrochureStore";
+import { HistoryItem, ProposalBrochureAttachment } from "@/types";
 
 // Dynamically import Editor to avoid SSR issues with BlockNote/Mantine
 const Editor = dynamic(() => import("@/components/Editor"), { ssr: false });
 const PdfHoverPreview = dynamic(() => import("@/components/PdfHoverPreview"), { ssr: false });
+const PdfBrochureMarkup = dynamic(() => import("@/components/PdfBrochureMarkup"), { ssr: false });
 
 type RelevanceChunk = {
   id: string;
@@ -188,6 +197,8 @@ export default function Home() {
   });
 
   const workbookImportInputRef = useRef<HTMLInputElement>(null);
+  const brochureUploadInputRef = useRef<HTMLInputElement>(null);
+  const brochureStateRef = useRef<ProposalBrochureAttachment[]>([]);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [activeTab, setActiveTab] = useState<"document" | "json">("document");
   const [isNavOpen, setIsNavOpen] = useState(true);
@@ -220,6 +231,10 @@ export default function Home() {
   const [alternateAmountInput, setAlternateAmountInput] = useState("");
   const [alternates, setAlternates] = useState<AncAlternateInput[]>([]);
   const [structuredDisplays, setStructuredDisplays] = useState<StructuredDisplay[]>([]);
+  const [brochures, setBrochures] = useState<ProposalBrochureAttachment[]>([]);
+  const [selectedBrochureId, setSelectedBrochureId] = useState<string | null>(null);
+  const [selectedMarkupDisplayId, setSelectedMarkupDisplayId] = useState<string | null>(null);
+  const [proposalStorageKey, setProposalStorageKey] = useState<string>("proposal:workspace");
   const [structuredWorkbook, setStructuredWorkbook] = useState<StructuredWorkbook | null>(null);
   const [ancEstimate, setAncEstimate] = useState<AncEstimateResult | null>(null);
   const [workbookDiff, setWorkbookDiff] = useState<WorkbookDiffSummary | null>(null);
@@ -284,12 +299,26 @@ export default function Home() {
             ? "GLM-OCR (Ollama)"
             : "Kreuzberg OCR";
 
+  const applyExistingBrochureRefs = useCallback(
+    (nextDisplays: StructuredDisplay[], sourceDisplays: StructuredDisplay[] = structuredDisplays) =>
+      mergeDisplaysWithBrochureRefs(
+        nextDisplays,
+        sourceDisplays.map((display) => ({
+          displayId: display.id,
+          displayName: display.name,
+          brochureRef: display.brochureRef ?? null,
+        })),
+      ),
+    [structuredDisplays],
+  );
+
   const loadBatchFile = useCallback(
     (nextIndex: number) => {
       if (batchFiles.length === 0) return;
       const clampedIndex = Math.max(0, Math.min(nextIndex, batchFiles.length - 1));
       const nextFile = batchFiles[clampedIndex];
       setActiveBatchIndex(clampedIndex);
+      setProposalStorageKey(buildProposalStorageKey({ fileName: nextFile.name }));
       processFile(nextFile);
       clearError();
       setIsPreviewVisible(previewMode === "auto");
@@ -313,11 +342,73 @@ export default function Home() {
     return () => window.clearTimeout(timeoutId);
   }, [fetchHistory]);
 
+  useEffect(() => {
+    let disposed = false;
+
+    const loadBrochureState = async () => {
+      const loadedState = await loadProposalBrochureState(proposalStorageKey);
+      if (disposed) {
+        revokeBrochureUrls(loadedState.brochures);
+        return;
+      }
+
+      setBrochures((current) => {
+        revokeBrochureUrls(current);
+        return loadedState.brochures;
+      });
+      setSelectedBrochureId(loadedState.brochures[0]?.id || null);
+      setStructuredDisplays((current) => mergeDisplaysWithBrochureRefs(current, loadedState.displayRefs));
+    };
+
+    void loadBrochureState();
+
+    return () => {
+      disposed = true;
+    };
+  }, [proposalStorageKey]);
+
+  useEffect(() => {
+    if (brochures.length === 0) {
+      setSelectedBrochureId(null);
+      return;
+    }
+
+    if (!selectedBrochureId || !brochures.some((brochure) => brochure.id === selectedBrochureId)) {
+      setSelectedBrochureId(brochures[0].id);
+    }
+  }, [brochures, selectedBrochureId]);
+
+  useEffect(() => {
+    if (structuredDisplays.length === 0) {
+      setSelectedMarkupDisplayId(null);
+      return;
+    }
+
+    if (!selectedMarkupDisplayId || !structuredDisplays.some((display) => display.id === selectedMarkupDisplayId)) {
+      setSelectedMarkupDisplayId(structuredDisplays.find((display) => !display.brochureRef)?.id || structuredDisplays[0].id);
+    }
+  }, [selectedMarkupDisplayId, structuredDisplays]);
+
+  useEffect(() => {
+    void saveProposalBrochureState(proposalStorageKey, brochures, structuredDisplays);
+  }, [brochures, proposalStorageKey, structuredDisplays]);
+
+  useEffect(() => {
+    brochureStateRef.current = brochures;
+  }, [brochures]);
+
+  useEffect(() => {
+    return () => {
+      revokeBrochureUrls(brochureStateRef.current);
+    };
+  }, []);
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFiles = Array.from(e.target.files || []);
     if (selectedFiles.length > 0) {
       setBatchFiles(selectedFiles);
       setActiveBatchIndex(0);
+      setProposalStorageKey(buildProposalStorageKey({ fileName: selectedFiles[0].name }));
       processFile(selectedFiles[0]);
       setIsPreviewVisible(previewMode === "auto");
       clearError();
@@ -342,10 +433,94 @@ export default function Home() {
     if (droppedFiles.length > 0) {
       setBatchFiles(droppedFiles);
       setActiveBatchIndex(0);
+      setProposalStorageKey(buildProposalStorageKey({ fileName: droppedFiles[0].name }));
       processFile(droppedFiles[0]);
       setIsPreviewVisible(previewMode === "auto");
       clearError();
     }
+  };
+
+  const handleBrochureUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFiles = Array.from(e.target.files || []).filter(
+      (candidate) => candidate.type === "application/pdf" || candidate.name.toLowerCase().endsWith(".pdf"),
+    );
+
+    if (selectedFiles.length === 0) {
+      e.currentTarget.value = "";
+      return;
+    }
+
+    const nextBrochures = selectedFiles.map((candidate) => ({
+      id: `brochure-${candidate.name}-${candidate.lastModified}-${candidate.size}`,
+      name: candidate.name,
+      size: candidate.size,
+      lastModified: candidate.lastModified,
+      type: candidate.type || "application/pdf",
+      file: candidate,
+      url: URL.createObjectURL(candidate),
+    } satisfies ProposalBrochureAttachment));
+
+    setBrochures((current) => {
+      const existingIds = new Set(current.map((brochure) => brochure.id));
+      return [...current, ...nextBrochures.filter((brochure) => !existingIds.has(brochure.id))];
+    });
+
+    setSelectedBrochureId((current) => current || nextBrochures[0]?.id || null);
+    e.currentTarget.value = "";
+  };
+
+  const assignBrochurePageToDisplay = (displayId: string, brochureId: string, pageNumber: number) => {
+    const brochure = brochures.find((item) => item.id === brochureId);
+    if (!brochure) return;
+
+    setStructuredDisplays((current) =>
+      current.map((display) =>
+        display.id === displayId
+          ? {
+              ...display,
+              brochureRef: {
+                brochureId,
+                brochureName: brochure.name,
+                pageNumber,
+                updatedAt: new Date().toISOString(),
+              },
+            }
+          : display,
+      ),
+    );
+  };
+
+  const clearBrochurePageForDisplay = (displayId: string) => {
+    setStructuredDisplays((current) =>
+      current.map((display) =>
+        display.id === displayId
+          ? {
+              ...display,
+              brochureRef: null,
+            }
+          : display,
+      ),
+    );
+  };
+
+  const handleRemoveBrochure = async (brochureId: string) => {
+    const brochureToRemove = brochures.find((brochure) => brochure.id === brochureId);
+    if (brochureToRemove?.url) {
+      URL.revokeObjectURL(brochureToRemove.url);
+    }
+
+    setBrochures((current) => current.filter((brochure) => brochure.id !== brochureId));
+    setStructuredDisplays((current) =>
+      current.map((display) =>
+        display.brochureRef?.brochureId === brochureId
+          ? {
+              ...display,
+              brochureRef: null,
+            }
+          : display,
+      ),
+    );
+    await removeProposalBrochure(proposalStorageKey, brochureId);
   };
 
   const handleDownloadPdfImages = async () => {
@@ -360,6 +535,7 @@ export default function Home() {
   const handleUpload = async () => {
     const targetFile = batchFiles[activeBatchIndex] || file;
     if (!targetFile) return;
+    setProposalStorageKey(buildProposalStorageKey({ fileName: targetFile.name }));
     setStructuredDisplays([]);
     
     // Show warning if using Marker or Docling
@@ -403,6 +579,7 @@ export default function Home() {
       for (let i = 0; i < batchFiles.length; i += 1) {
         const currentFile = batchFiles[i];
         setActiveBatchIndex(i);
+        setProposalStorageKey(buildProposalStorageKey({ fileName: currentFile.name }));
         processFile(currentFile);
 
         const extractedText = await extractContent(
@@ -434,6 +611,7 @@ export default function Home() {
   const handleSelectHistoryItem = (item: HistoryItem) => {
     setAncEstimate(null);
     setStructuredDisplays([]);
+    setProposalStorageKey(buildProposalStorageKey({ historyId: item.id, fileName: item.filename }));
     setHistoryItem(item);
     setEditorSourceMode("full");
     setEditorEnabled(true);
@@ -474,6 +652,11 @@ export default function Home() {
     setWorkbookSheets([]);
     setActiveWorkbookSheet("");
     setStructuredDisplays([]);
+    revokeBrochureUrls(brochures);
+    setBrochures([]);
+    setSelectedBrochureId(null);
+    setSelectedMarkupDisplayId(null);
+    setProposalStorageKey(buildProposalStorageKey({ fallback: "proposal:workspace" }));
     setRelevanceSummary(buildEmptyRelevanceSummary());
     setIsPreviewVisible(true);
     setPdfPageSelection("");
@@ -599,7 +782,7 @@ export default function Home() {
   const runAncEstimateFromText = (sourceText: string) => {
     const trimmedText = sourceText.trim();
     if (!trimmedText) return;
-    const parsedDisplays = extractStructuredDisplays(trimmedText);
+    const parsedDisplays = applyExistingBrochureRefs(extractStructuredDisplays(trimmedText));
     setStructuredDisplays(parsedDisplays);
     const parsedTaxRate = Number(taxRateOverrideInput);
     const parsedBondRate = Number(bondRateOverrideInput);
@@ -628,7 +811,7 @@ export default function Home() {
     setIsRunningEstimate(true);
     try {
       const parsedDisplays = extractStructuredDisplays(sourceText);
-      setStructuredDisplays(parsedDisplays);
+      setStructuredDisplays(applyExistingBrochureRefs(parsedDisplays));
       const parsedTaxRate = Number(taxRateOverrideInput);
       const parsedBondRate = Number(bondRateOverrideInput);
       const taxRateOverride = Number.isFinite(parsedTaxRate) && parsedTaxRate >= 0 ? parsedTaxRate / 100 : null;
@@ -1190,6 +1373,11 @@ export default function Home() {
                         setBatchProgress({ current: 0, total: 0 });
                         setAncEstimate(null);
                         setStructuredDisplays([]);
+                        revokeBrochureUrls(brochures);
+                        setBrochures([]);
+                        setSelectedBrochureId(null);
+                        setSelectedMarkupDisplayId(null);
+                        setProposalStorageKey(buildProposalStorageKey({ fallback: "proposal:workspace" }));
                       }}
                       className="text-xs text-red-500 hover:underline"
                     >
@@ -1611,6 +1799,30 @@ export default function Home() {
                         </p>
                       )}
                     </div>
+                    <input
+                      ref={brochureUploadInputRef}
+                      type="file"
+                      accept=".pdf,application/pdf"
+                      multiple
+                      className="hidden"
+                      onChange={handleBrochureUpload}
+                    />
+                    {structuredDisplays.length > 0 ? (
+                      <PdfBrochureMarkup
+                        brochures={brochures}
+                        displays={structuredDisplays}
+                        selectedBrochureId={selectedBrochureId}
+                        selectedDisplayId={selectedMarkupDisplayId}
+                        onSelectBrochure={setSelectedBrochureId}
+                        onSelectDisplay={setSelectedMarkupDisplayId}
+                        onAssignPage={assignBrochurePageToDisplay}
+                        onClearDisplayLink={clearBrochurePageForDisplay}
+                        onRemoveBrochure={(brochureId) => {
+                          void handleRemoveBrochure(brochureId);
+                        }}
+                        onUploadClick={() => brochureUploadInputRef.current?.click()}
+                      />
+                    ) : null}
                     {ancEstimate ? (
                       <div className="mt-3 grid grid-cols-2 md:grid-cols-6 gap-2 text-xs">
                         <div className="rounded-lg border border-slate-200 bg-slate-50 p-2">

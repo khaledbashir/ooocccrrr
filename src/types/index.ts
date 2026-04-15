@@ -1,5 +1,3 @@
-import { OcrProvider } from '@/lib/constants';
-
 export interface Extraction {
   id: string;
   filename: string;
@@ -39,6 +37,23 @@ export interface PdfTextItem {
   str: string;
   transform: number[];
   width: number;
+}
+
+export interface BrochurePageReference {
+  brochureId: string;
+  brochureName: string;
+  pageNumber: number;
+  updatedAt: string;
+}
+
+export interface ProposalBrochureAttachment {
+  id: string;
+  name: string;
+  size: number;
+  lastModified: number;
+  type: string;
+  file?: File;
+  url?: string;
 }
 
 export interface FileProcessingState {

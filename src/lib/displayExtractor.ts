@@ -1,3 +1,5 @@
+import type { BrochurePageReference } from "@/types";
+
 export type StructuredDisplay = {
   id: string;
   name: string;
@@ -8,6 +10,7 @@ export type StructuredDisplay = {
   pitchMm: number | null;
   quantity: number;
   isOutdoor: boolean;
+  brochureRef?: BrochurePageReference | null;
 };
 
 function clean(input: string): string {
@@ -85,4 +88,3 @@ export function extractStructuredDisplays(rawText: string): StructuredDisplay[] 
 
   return displays;
 }
-
