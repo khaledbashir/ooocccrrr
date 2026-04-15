@@ -110,3 +110,12 @@ export async function GET() {
     return NextResponse.json({ error: ERROR_MESSAGES.FAILED_TO_FETCH_EXTRACTS }, { status: 500 });
   }
 }
+
+export async function DELETE() {
+  try {
+    await prisma.extraction.deleteMany();
+    return NextResponse.json({ ok: true });
+  } catch {
+    return NextResponse.json({ error: 'Failed to clear extraction history.' }, { status: 500 });
+  }
+}

@@ -7,14 +7,12 @@ import {
   Download,
   FolderUp,
   Calculator,
-  History,
   Loader2,
   Image as ImageIcon,
   FileSpreadsheet,
   File as FileIcon,
   ChevronLeft,
   ChevronRight,
-  Database,
   Filter,
   CheckCircle2,
   AlertTriangle,
@@ -200,6 +198,10 @@ export default function Home() {
   const brochureUploadInputRef = useRef<HTMLInputElement>(null);
   const brochureStateRef = useRef<ProposalBrochureAttachment[]>([]);
   const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [selectedHistoryItemId, setSelectedHistoryItemId] = useState<string | null>(null);
+  const [historyRenameId, setHistoryRenameId] = useState<string | null>(null);
+  const [historyRenameValue, setHistoryRenameValue] = useState("");
+  const [editorDocumentContent, setEditorDocumentContent] = useState("");
   const [activeTab, setActiveTab] = useState<"document" | "json">("document");
   const [isNavOpen, setIsNavOpen] = useState(true);
   const [isPreviewOpen, setIsPreviewOpen] = useState(true);
@@ -334,6 +336,25 @@ export default function Home() {
       console.error("Failed to fetch history", error);
     }
   }, []);
+
+  const persistHistoryItem = useCallback(
+    async (id: string, updates: { filename?: string; content?: string }) => {
+      const response = await fetch(`/api/extract/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updates),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to update history item.");
+      }
+
+      const updated = (await response.json()) as HistoryItem;
+      setHistory((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+      return updated;
+    },
+    [],
+  );
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -523,6 +544,64 @@ export default function Home() {
     await removeProposalBrochure(proposalStorageKey, brochureId);
   };
 
+  const handleDeleteHistoryItem = async (item: HistoryItem) => {
+    const response = await fetch(`/api/extract/${item.id}`, {
+      method: "DELETE",
+    });
+
+    if (!response.ok) {
+      throw new Error("Failed to delete history item.");
+    }
+
+    setHistory((current) => current.filter((entry) => entry.id !== item.id));
+
+    if (selectedHistoryItemId === item.id) {
+      handleReset();
+    }
+  };
+
+  const handleClearHistory = async () => {
+    const response = await fetch("/api/extract", {
+      method: "DELETE",
+    });
+
+    if (!response.ok) {
+      throw new Error("Failed to clear history.");
+    }
+
+    setHistory([]);
+    handleReset();
+  };
+
+  const startHistoryRename = (item: HistoryItem) => {
+    setHistoryRenameId(item.id);
+    setHistoryRenameValue(item.filename);
+  };
+
+  const handleSaveHistoryRename = async (item: HistoryItem) => {
+    const nextFilename = historyRenameValue.trim();
+    if (!nextFilename) return;
+
+    const updated = await persistHistoryItem(item.id, { filename: nextFilename });
+    if (selectedHistoryItemId === item.id) {
+      setHistoryItem(updated);
+    }
+    setHistoryRenameId(null);
+    setHistoryRenameValue("");
+  };
+
+  const handleSaveEditedHistoryContent = async () => {
+    if (!selectedHistoryItemId) return;
+
+    const nextContent = (editorDocumentContent || extractedContent).trim();
+    if (!nextContent) return;
+
+    const updated = await persistHistoryItem(selectedHistoryItemId, {
+      content: JSON.stringify({ markdown: nextContent }),
+    });
+    setHistoryItem(updated);
+  };
+
   const handleDownloadPdfImages = async () => {
     if (!file) return;
     if (!isPdfSelectedFile) {
@@ -537,6 +616,8 @@ export default function Home() {
     if (!targetFile) return;
     setProposalStorageKey(buildProposalStorageKey({ fileName: targetFile.name }));
     setStructuredDisplays([]);
+    setSelectedHistoryItemId(null);
+    setEditorDocumentContent("");
     
     // Show warning if using Marker or Docling
     if (ocrProvider === 'marker' || ocrProvider === 'docling') {
@@ -571,6 +652,8 @@ export default function Home() {
   const handleExtractAll = async () => {
     if (batchFiles.length === 0 || isBatchExtracting) return;
     setAncEstimate(null);
+    setSelectedHistoryItemId(null);
+    setEditorDocumentContent("");
     setIsBatchExtracting(true);
     setBatchProgress({ current: 0, total: batchFiles.length });
     setIsPreviewVisible(previewMode === "auto");
@@ -611,6 +694,8 @@ export default function Home() {
   const handleSelectHistoryItem = (item: HistoryItem) => {
     setAncEstimate(null);
     setStructuredDisplays([]);
+    setSelectedHistoryItemId(item.id);
+    setEditorDocumentContent("");
     setProposalStorageKey(buildProposalStorageKey({ historyId: item.id, fileName: item.filename }));
     setHistoryItem(item);
     setEditorSourceMode("full");
@@ -652,6 +737,10 @@ export default function Home() {
     setWorkbookSheets([]);
     setActiveWorkbookSheet("");
     setStructuredDisplays([]);
+    setSelectedHistoryItemId(null);
+    setHistoryRenameId(null);
+    setHistoryRenameValue("");
+    setEditorDocumentContent("");
     revokeBrochureUrls(brochures);
     setBrochures([]);
     setSelectedBrochureId(null);
@@ -665,6 +754,8 @@ export default function Home() {
   const handleEnableEditor = () => {
     setEditorEnabled(true);
     setEditorSourceMode("blank");
+    setSelectedHistoryItemId(null);
+    setEditorDocumentContent("");
   };
 
   const buildWorkbookArtifacts = (model: StructuredWorkbook) => {
@@ -922,6 +1013,8 @@ export default function Home() {
     setWorkbookEditorContent(markdown);
     setEditorSourceMode("workbook");
     setEditorEnabled(true);
+    setSelectedHistoryItemId(null);
+    setEditorDocumentContent("");
     setIsEditorOpen(true);
     setActiveTab("document");
   };
@@ -1042,6 +1135,15 @@ export default function Home() {
             <>
               <div className="p-4 border-b flex items-center gap-2">
                 <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">History</p>
+                {history.length > 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => void handleClearHistory()}
+                    className="rounded-md border border-rose-200 bg-rose-50 px-2 py-1 text-[11px] font-semibold text-rose-700 hover:bg-rose-100"
+                  >
+                    Clear All
+                  </button>
+                ) : null}
                 <button
                   onClick={() => setIsNavOpen(false)}
                   className="ml-auto h-9 w-9 rounded-lg border border-slate-200 text-slate-500 hover:text-slate-700 hover:bg-slate-50"
@@ -1052,41 +1154,92 @@ export default function Home() {
               </div>
               
               <div className="flex-1 overflow-y-auto p-4">
-                <div className="flex items-center gap-2 mb-4 text-gray-500 font-semibold text-xs uppercase tracking-wider">
-                  <History size={14} />
-                  Extraction History
-                </div>
-                
                 <div className="space-y-2">
                   {history.map((item) => (
-                    <button
+                    <div
                       key={item.id}
-                      onClick={() => {
-                        handleSelectHistoryItem(item);
-                      }}
-                      className="w-full text-left p-3 rounded-lg hover:bg-gray-50 border border-transparent hover:border-gray-200 transition-all group"
+                      className={`rounded-lg border p-3 transition-all ${
+                        selectedHistoryItemId === item.id
+                          ? "border-indigo-200 bg-indigo-50/60"
+                          : "border-transparent hover:border-gray-200 hover:bg-gray-50"
+                      }`}
                     >
-                      <div className="flex items-center gap-3">
-                        <div className="p-2 bg-indigo-50 text-indigo-600 rounded-lg group-hover:bg-indigo-100 transition-colors">
+                      <div className="flex items-start gap-3">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            handleSelectHistoryItem(item);
+                          }}
+                          className="p-2 rounded-lg bg-indigo-50 text-indigo-600 transition-colors hover:bg-indigo-100"
+                        >
                           <FileText size={16} />
+                        </button>
+                        <div className="min-w-0 flex-1">
+                          {historyRenameId === item.id ? (
+                            <div className="space-y-2">
+                              <input
+                                type="text"
+                                value={historyRenameValue}
+                                onChange={(e) => setHistoryRenameValue(e.target.value)}
+                                className="w-full rounded-md border border-slate-200 px-2 py-1.5 text-sm font-medium text-slate-800"
+                              />
+                              <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => void handleSaveHistoryRename(item)}
+                                  className="rounded-md bg-indigo-600 px-2 py-1 text-[11px] font-semibold text-white hover:bg-indigo-700"
+                                >
+                                  Save
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setHistoryRenameId(null);
+                                    setHistoryRenameValue("");
+                                  }}
+                                  className="rounded-md border border-slate-200 px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  handleSelectHistoryItem(item);
+                                }}
+                                className="block w-full text-left"
+                              >
+                                <p className="text-sm font-medium text-gray-900 truncate">{item.filename}</p>
+                                <p className="text-xs text-gray-400 mt-0.5">
+                                  {new Date(item.createdAt).toLocaleDateString()}
+                                </p>
+                              </button>
+                              <div className="mt-2 flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => startHistoryRename(item)}
+                                  className="text-[11px] font-semibold text-slate-600 hover:text-slate-900"
+                                >
+                                  Rename
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => void handleDeleteHistoryItem(item)}
+                                  className="text-[11px] font-semibold text-rose-600 hover:text-rose-700"
+                                >
+                                  Delete
+                                </button>
+                              </div>
+                            </>
+                          )}
                         </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-gray-900 truncate">{item.filename}</p>
-                          <p className="text-xs text-gray-400 mt-0.5">
-                            {new Date(item.createdAt).toLocaleDateString()}
-                          </p>
-                        </div>
-                        <ChevronRight size={14} className="text-gray-300 group-hover:text-indigo-400" />
+                        <ChevronRight size={14} className="mt-1 text-gray-300" />
                       </div>
-                    </button>
+                    </div>
                   ))}
-                </div>
-              </div>
-
-              <div className="p-4 border-t bg-gray-50">
-                <div className="flex items-center gap-2 text-gray-500 text-xs">
-                  <Database size={12} />
-                  <span>SQLite Database Active</span>
                 </div>
               </div>
             </>
@@ -1555,6 +1708,8 @@ export default function Home() {
                         onClick={() => {
                           if (!relevanceSummary.relevantContent) return;
                           setEditorSourceMode("relevant");
+                          setSelectedHistoryItemId(null);
+                          setEditorDocumentContent("");
                           setIsEditorOpen(true);
                           setActiveTab("document");
                           setEditorEnabled(true);
@@ -1568,6 +1723,8 @@ export default function Home() {
                         type="button"
                         onClick={() => {
                           setEditorSourceMode("full");
+                          setSelectedHistoryItemId(null);
+                          setEditorDocumentContent("");
                           setIsEditorOpen(true);
                           setActiveTab("document");
                           setEditorEnabled(true);
@@ -1923,13 +2080,24 @@ export default function Home() {
                 Raw JSON
               </button>
                 </div>
-                <button
-                  onClick={() => setIsEditorOpen(false)}
-                  className="mb-3 h-9 w-9 rounded-lg border border-slate-200 text-slate-500 hover:text-slate-700 hover:bg-slate-50"
-                  title="Collapse editor"
-                >
-                  <ChevronRight size={16} className="mx-auto" />
-                </button>
+                <div className="mb-3 flex items-center gap-2">
+                  {selectedHistoryItemId && activeTab === "document" ? (
+                    <button
+                      type="button"
+                      onClick={() => void handleSaveEditedHistoryContent()}
+                      className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-700"
+                    >
+                      Save History Item
+                    </button>
+                  ) : null}
+                  <button
+                    onClick={() => setIsEditorOpen(false)}
+                    className="h-9 w-9 rounded-lg border border-slate-200 text-slate-500 hover:text-slate-700 hover:bg-slate-50"
+                    title="Collapse editor"
+                  >
+                    <ChevronRight size={16} className="mx-auto" />
+                  </button>
+                </div>
               </header>
 
               <div className="flex-1 overflow-hidden">
@@ -1944,9 +2112,9 @@ export default function Home() {
                     : "";
               return activeTab === "document" ? (
                 selectedEditorContent ? (
-                  <Editor initialContent={selectedEditorContent} />
+                  <Editor initialContent={selectedEditorContent} onChange={setEditorDocumentContent} />
                 ) : editorEnabled ? (
-                  <Editor initialContent="" />
+                  <Editor initialContent="" onChange={setEditorDocumentContent} />
                 ) : (
                   <div className="h-full flex flex-col items-center justify-center p-8 text-center text-gray-400">
                     <FileText size={64} strokeWidth={1} className="mb-4 opacity-20" />
